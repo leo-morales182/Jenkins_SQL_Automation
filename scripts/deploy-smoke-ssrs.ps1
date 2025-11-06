@@ -100,21 +100,25 @@ $img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
 $rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\Smoke_detailed.rdl"
 
 # Recurso (imagen)
-Write-RsCatalogItem `
-  -ReportServerUri $ApiUrl `
-  -Path      $img            `  # ruta LOCAL de la imagen
-  -RsFolder  $TargetFolder   `  # carpeta en SSRS (ej: /Apps/Smoke)
-  -Overwrite `
-  -Credential $cred | Out-Null
+$wrImg = @{
+  ReportServerUri = $ApiUrl
+  Path           = $img          # ruta LOCAL de la imagen
+  RsFolder       = $TargetFolder # carpeta en SSRS (ej: /Apps/Smoke)
+  Overwrite      = $true
+  Credential     = $cred
+}
+Write-RsCatalogItem @wrImg | Out-Null
 
 # Reporte (RDL)
-Write-RsCatalogItem `
-  -ReportServerUri $ApiUrl `
-  -Path      $rdl            `  # ruta LOCAL del .rdl
-  -RsFolder  $TargetFolder   `  # carpeta en SSRS (ej: /Apps/Smoke)
-  -Name      "Smoke_detailed" `
-  -Overwrite `
-  -Credential $cred | Out-Null
+$wrRdl = @{
+  ReportServerUri = $ApiUrl
+  Path           = $rdl          # ruta LOCAL del .rdl
+  RsFolder       = $TargetFolder # carpeta en SSRS (ej: /Apps/Smoke)
+  Name           = 'Smoke_detailed'
+  Overwrite      = $true
+  Credential     = $cred
+}
+Write-RsCatalogItem @wrRdl | Out-Null
 
 
 
