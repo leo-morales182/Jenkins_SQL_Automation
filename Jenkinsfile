@@ -38,6 +38,30 @@ pipeline {
             Write-Host "Copiado RDL a: $rdlDestino"
             '''
 
+            powershell '''
+            $ErrorActionPreference = "Stop"
+            $ProgressPreference = "SilentlyContinue"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+            # 1) Proveedor NuGet sin prompts
+            if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+                Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+            }
+
+            # 2) Confiar en PSGallery y evitar confirmaciones
+            if ((Get-PSRepository -Name PSGallery).InstallationPolicy -ne "Trusted") {
+                Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            }
+
+            # 3) Instalar ReportingServicesTools sin prompts (si falta)
+            if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
+                Install-Module ReportingServicesTools -Scope CurrentUser -Force -AllowClobber -Confirm:$false
+            }
+
+            # 4) Import explícito
+            Import-Module ReportingServicesTools -Force
+            '''
+
             // 3) Ejecutar el script desde /scripts (donde ya lo encontramos)
             powershell '''
             $script = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
