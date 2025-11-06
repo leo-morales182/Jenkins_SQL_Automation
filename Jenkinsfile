@@ -9,7 +9,8 @@ pipeline {
           checkout([
             $class: 'GitSCM',
             branches: [[name: '*/main']],
-            userRemoteConfigs: [[url: 'https://github.com/leo-morales182/Jenkins_SQL_Automation.git']]
+            userRemoteConfigs: [[url: 'https://github.com/leo-morales182/Jenkins_SQL_Automation.git',
+            credentialsID: 'github-pat-leo']]
           ])
         }
       }
@@ -21,7 +22,8 @@ pipeline {
           checkout([
             $class: 'GitSCM',
             branches: [[name: '*/main']],
-            userRemoteConfigs: [[url: 'https://github.com/leo-morales182/ssrs_projects.git']]
+            userRemoteConfigs: [[url: 'https://github.com/leo-morales182/ssrs_projects.git',
+            credentialsID: 'github-pat-leo']]
           ])
         }
       }
