@@ -99,15 +99,6 @@ Ensure-Folder -ApiUrl $ApiUrl -Path $TargetFolder -Credential $cred
 $img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
 $rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\Smoke_detailed.rdl"
 
-# Recurso (imagen)
-$wrImg = @{
-  ReportServerUri = $ApiUrl
-  Path           = $img          # ruta LOCAL de la imagen
-  RsFolder       = $TargetFolder # carpeta en SSRS (ej: /Apps/Smoke)
-  Overwrite      = $true
-  Credential     = $cred
-}
-Write-RsCatalogItem @wrImg | Out-Null
 
 # Reporte (RDL)
 $wrRdl = @{
