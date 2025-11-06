@@ -13,7 +13,46 @@ if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
   Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
   Install-Module ReportingServicesTools -Scope CurrentUser -Force -AllowClobber
 }
-Import-Module ReportingServicesTools -Force
+
+Write-Host "Cargando módulo ReportingServicesTools..."
+
+# 1) Limpiar alias conflictivos si existen
+$aliases = @(
+    "Register-PowerBI",
+    "Set-RsEmailSettingsAsNTLMAuth",
+    "Set-RsEmailSettingsAsNoAuth",
+    "Set-RsEmailSettingsAsBasicAuth",
+    "Get-RsCacheRefreshPlan",
+    "Get-RsCatalogItem",
+    "Get-RsItem",
+    "Get-RsRestItemDataModelParameters",
+    "Remove-RsPbiReportRefresh",
+    "Set-RsRestItemDataModelParameters",
+    "Start-RsPbiReportRefresh",
+    "Get-RsCatalogItems",
+    "Get-RsChildItem",
+    "rsdir",
+    "Get-RsItemReferences",
+    "Set-RsDataSet",
+    "Set-RsSharedDataSource",
+    "Grant-AccessOnCatalogItem",
+    "Grant-AccessToRs",
+    "Revoke-AccessOnCatalogItem",
+    "Revoke-AccessToRs"
+)
+
+foreach ($a in $aliases) {
+    if (Get-Alias -Name $a -ErrorAction SilentlyContinue) {
+        Remove-Item "alias:$a" -Force
+    }
+}
+
+# 2) Cargar módulo desde la ubicación controlada
+$modulePath = "C:\jenkins\psmodules\ReportingServicesTools\0.0.9.3"
+Import-Module $modulePath -Force
+
+Write-Host "✅ Módulo cargado OK desde $modulePath"
+
 
 # 2) Credenciales (si se proveen)
 $cred = $null
