@@ -39,7 +39,7 @@ stage('Deploy SSRS') {
       Copy-Item $origen $destino -Force
       Write-Host "Copiado RDL a: $destino"
 
-      # --- Bootstrap sin prompts, instalando GLOBALMENTE ---
+      # --- Bootstrap PowerShellGet / NuGet sin prompts ---
       if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
         Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
       }
@@ -54,18 +54,32 @@ stage('Deploy SSRS') {
         Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
       }
 
-      # Instalar para todos los usuarios (evita perfil SYSTEM raro)
-      $globalModules = "$env:ProgramFiles\\WindowsPowerShell\\Modules"
-      if (-not (Test-Path $globalModules)) { New-Item -Type Directory -Path $globalModules | Out-Null }
+      # --- Instalar el módulo en una carpeta controlada y cargarlo por ruta ---
+      $modBase = "C:\\jenkins\\psmodules"
+      $modName = "ReportingServicesTools"
+      if (-not (Test-Path $modBase)) { New-Item -Type Directory -Path $modBase | Out-Null }
 
-      if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
-        Install-Module ReportingServicesTools -Scope AllUsers -Force -AllowClobber -Confirm:$false
+      # Si no existe ya guardado, descargarlo (sin prompts)
+      if (-not (Get-ChildItem -Directory (Join-Path $modBase $modName) -ErrorAction SilentlyContinue)) {
+        Save-Module -Name $modName -Path $modBase -Force
       }
 
-      # Importar y validar
-      Import-Module ReportingServicesTools -Force -ErrorAction Stop
+      # Importar el .psd1 más reciente
+      $modPath = Get-ChildItem -Directory (Join-Path $modBase $modName) | Sort-Object Name -Descending | Select-Object -First 1
+      if (-not $modPath) { throw "No pude descargar $modName a $modBase" }
+
+      $psd1 = Join-Path $modPath.FullName "$modName.psd1"
+      if (-not (Test-Path $psd1)) {
+        # fallback por si el manifiesto tiene otro nombre
+        $psd1 = Get-ChildItem -Path $modPath.FullName -Filter *.psd1 -Recurse | Select-Object -First 1 -Expand FullName
+      }
+      if (-not (Test-Path $psd1)) { throw "No encontré el archivo .psd1 de $modName bajo $($modPath.FullName)" }
+
+      Import-Module $psd1 -Force -ErrorAction Stop
+
+      # Validar cmdlet
       $cmd = Get-Command Get-RsFolder -ErrorAction Stop
-      Write-Host "Módulo cargado OK desde: $($cmd.Source)"
+      Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
 
       # --- Ejecutar el deploy (misma sesión) ---
       & $script `
@@ -75,7 +89,6 @@ stage('Deploy SSRS') {
     '''
   }
 }
-
 
 
 
