@@ -20,6 +20,35 @@ pipeline {
 
     stage('Deploy SSRS') {
       steps {
+
+        powershell '''
+        Write-Host "=== WORKSPACE === $env:WORKSPACE"
+        Write-Host "=== Árbol de archivos (primeros 200) ==="
+        Get-ChildItem -Recurse | Select-Object -First 200 -ExpandProperty FullName
+
+        $candidato1 = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
+        $candidato2 = Join-Path $env:WORKSPACE "automation\\scripts\\deploy-smoke-ssrs.ps1"
+
+        if (Test-Path $candidato1) {
+            $script = $candidato1
+            Write-Host "Usando script: $script"
+        } elseif (Test-Path $candidato2) {
+            $script = $candidato2
+            Write-Host "Usando script: $script"
+        } else {
+            Write-Host "NO se encontró deploy-smoke-ssrs.ps1 en:"
+            Write-Host " - $candidato1"
+            Write-Host " - $candidato2"
+            Write-Host "Contenido de la raíz:"
+            Get-ChildItem
+            throw "No se encontró deploy-smoke-ssrs.ps1. Verifica la ruta en el repo."
+        }
+
+        & "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command `
+            "& '$script' -PortalUrl 'http://localhost/Reports' -ApiUrl 'http://localhost/ReportServer' -TargetFolder '/Apps/Smoke'" `
+            2>&1
+        '''
+
         // (1) Mostrar la estructura de carpetas para ubicar el .ps1
         powershell '''
         Write-Host "=== Listando archivos .ps1 en el workspace ==="
