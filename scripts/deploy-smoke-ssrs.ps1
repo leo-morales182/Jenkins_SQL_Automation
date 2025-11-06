@@ -96,20 +96,31 @@ function Ensure-Folder {
 $TargetFolder = Normalize-RsPath $TargetFolder
 Ensure-Folder -ApiUrl $ApiUrl -Path $TargetFolder -Credential $cred
 
-# 5) Publicar recurso opcional
+# Subir el recurso (imagen)
 $img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
 if (Test-Path $img) {
-  Write-RsCatalogItem -ReportServerUri $ApiUrl -Path $TargetFolder -Name "logo.jpg" `
-    -TypeName  "Resource" -Overwrite -Content (Resolve-Path $img) -MimeType "image/jpg" -Credential $cred | Out-Null
+  
+  Write-RsCatalogItem `
+  -ReportServerUri $ApiUrl `
+  -Path $img `                    # ruta local al .jpg/.png
+  -RsFolder $TargetFolder `       # ej: /Apps/Smoke
+  -Overwrite `
+  -Credential $cred | Out-Null
+
   Write-Host "Publicado recurso: logo.jpg"
 }
 
-# 6) Publicar RDL de prueba
+# Subir el reporte (RDL)
 $rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\Smoke_detailed.rdl"
 if (-not (Test-Path $rdl)) { throw "No existe el RDL de prueba: $rdl" }
 
-Write-RsCatalogItem -ReportServerUri $ApiUrl -Path $TargetFolder -Name "Smoke_detailed" `
-  -TypeName "Report" -Overwrite -Content (Resolve-Path $rdl) -Credential $cred | Out-Null
+Write-RsCatalogItem `
+  -ReportServerUri $ApiUrl `
+  -Path $rdl `                    # ruta local al .rdl
+  -RsFolder $TargetFolder `
+  -Name "Smoke_detailed" `        # nombre visible en SSRS (opcional)
+  -Overwrite `
+  -Credential $cred | Out-Null
 
 Write-Host "Publicado reporte: Smoke_detailed"
 
