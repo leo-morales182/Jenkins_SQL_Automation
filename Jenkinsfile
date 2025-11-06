@@ -19,66 +19,37 @@ pipeline {
         }
 
     stage('Deploy SSRS') {
-      steps {
+        steps {
+            // 1) Mostrar workspace y confirmar rutas
+            powershell '''
+            Write-Host "WORKSPACE: $env:WORKSPACE"
+            Get-ChildItem -Recurse -Filter deploy-smoke-ssrs.ps1 | Select-Object FullName
+            '''
 
-        powershell '''
-        Write-Host "=== WORKSPACE === $env:WORKSPACE"
-        Write-Host "=== Árbol de archivos (primeros 200) ==="
-        Get-ChildItem -Recurse | Select-Object -First 200 -ExpandProperty FullName
+            // 2) Crear la ruta que espera el script y copiar el RDL de smoke
+            powershell '''
+            $rdlOrigen  = Join-Path $env:WORKSPACE "ssrs\\smoke_project\\Smoke_detailed.rdl"
+            $rdlDestino = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\hello_world.rdl"
 
-        $candidato1 = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
-        $candidato2 = Join-Path $env:WORKSPACE "automation\\scripts\\deploy-smoke-ssrs.ps1"
+            if (-not (Test-Path $rdlOrigen)) { throw "No encuentro el RDL de origen: $rdlOrigen" }
 
-        if (Test-Path $candidato1) {
-            $script = $candidato1
-            Write-Host "Usando script: $script"
-        } elseif (Test-Path $candidato2) {
-            $script = $candidato2
-            Write-Host "Usando script: $script"
-        } else {
-            Write-Host "NO se encontró deploy-smoke-ssrs.ps1 en:"
-            Write-Host " - $candidato1"
-            Write-Host " - $candidato2"
-            Write-Host "Contenido de la raíz:"
-            Get-ChildItem
-            throw "No se encontró deploy-smoke-ssrs.ps1. Verifica la ruta en el repo."
+            New-Item -ItemType Directory -Force -Path (Split-Path $rdlDestino) | Out-Null
+            Copy-Item $rdlOrigen $rdlDestino -Force
+            Write-Host "Copiado RDL a: $rdlDestino"
+            '''
+
+            // 3) Ejecutar el script desde /scripts (donde ya lo encontramos)
+            powershell '''
+            $script = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
+            if (-not (Test-Path $script)) { throw "No encuentro el script: $script" }
+
+            & $script `
+                -PortalUrl  "http://localhost/Reports" `
+                -ApiUrl     "http://localhost/ReportServer" `
+                -TargetFolder "/Apps/Smoke"
+            '''
+        }
         }
 
-        & "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command `
-            "& '$script' -PortalUrl 'http://localhost/Reports' -ApiUrl 'http://localhost/ReportServer' -TargetFolder '/Apps/Smoke'" `
-            2>&1
-        '''
-
-        // (1) Mostrar la estructura de carpetas para ubicar el .ps1
-        powershell '''
-        Write-Host "=== Listando archivos .ps1 en el workspace ==="
-        Get-ChildItem -Recurse -Filter deploy-smoke-ssrs.ps1 | Select-Object FullName
-        '''
-
-        // (2) Mostrar estructura general para ver dónde quedó cada repo
-        powershell '''
-        Write-Host "=== Listando carpetas en el workspace ==="
-        Get-ChildItem -Directory | Select-Object Name
-        '''
-
-         // (3) Intentar ejecutar (no lo cambiamos aún, solo observamos la salida)
-         powershell '''
-        & .\\scripts\\deploy-smoke-ssrs.ps1 `
-            -PortalUrl  "http://localhost/Reports" `
-            -ApiUrl     "http://localhost/ReportServer" `
-            -TargetFolder "/Apps/Smoke"
-        '''
-
-        powershell '''
-          # Ejecutar script desde el repo de automatización,
-          # usando los reportes ubicados en el repo ssrs.
-          ./automation/scripts/deploy-smoke-ssrs.ps1 `
-            -PortalUrl  "http://desktop-p7l4ng4/Reports" `
-            -ApiUrl     "http://desktop-p7l4ng4/ReportServer" `
-            -TargetFolder "/Apps/Smoke" `
-            -ProjectPath "./ssrs"   # <--- si deseas pasar la ruta como parámetro
-        '''
-      }
-    }
-  }
+        }
 }

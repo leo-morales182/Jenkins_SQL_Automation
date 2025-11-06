@@ -41,20 +41,20 @@ function Ensure-Folder($path) {
 Ensure-Folder $TargetFolder
 
 # 5) Publicar recurso opcional
-$img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.png"
+$img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
 if (Test-Path $img) {
-  Write-RsCatalogItem -ReportServerUri $ApiUrl -Path $TargetFolder -Name "logo.png" `
-    -ItemType "Resource" -Overwrite -Content (Resolve-Path $img) -MimeType "image/png" -Credential $cred | Out-Null
-  Write-Host "Publicado recurso: logo.png"
+  Write-RsCatalogItem -ReportServerUri $ApiUrl -Path $TargetFolder -Name "logo.jpg" `
+    -ItemType "Resource" -Overwrite -Content (Resolve-Path $img) -MimeType "image/jpg" -Credential $cred | Out-Null
+  Write-Host "Publicado recurso: logo.jpg"
 }
 
 # 6) Publicar RDL de prueba
-$rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\hello_world.rdl"
+$rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\Smoke_detailed.rdl"
 if (-not (Test-Path $rdl)) { throw "No existe el RDL de prueba: $rdl" }
 
-Write-RsCatalogItem -ReportServerUri $ApiUrl -Path $TargetFolder -Name "hello_world" `
+Write-RsCatalogItem -ReportServerUri $ApiUrl -Path $TargetFolder -Name "Smoke_detailed" `
   -ItemType "Report" -Overwrite -Content (Resolve-Path $rdl) -Credential $cred | Out-Null
-Write-Host "Publicado reporte: hello_world"
+Write-Host "Publicado reporte: Smoke_detailed"
 
 # 7) (Opcional) Vincular DataSource compartido si tu RDL lo requiere
 # Set-RsDataSourceReference -ReportServerUri $ApiUrl -Path "$TargetFolder/hello_world" `
