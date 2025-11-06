@@ -96,33 +96,27 @@ function Ensure-Folder {
 $TargetFolder = Normalize-RsPath $TargetFolder
 Ensure-Folder -ApiUrl $ApiUrl -Path $TargetFolder -Credential $cred
 
-# Subir el recurso (imagen)
 $img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
-if (Test-Path $img) {
-  
-  Write-RsCatalogItem `
-  -ReportServerUri $ApiUrl `
-  -Path $img `                    # ruta local al .jpg/.png
-  -RsFolder $TargetFolder `       # ej: /Apps/Smoke
-  -Overwrite `
-  -Credential $cred | Out-Null
-
-  Write-Host "Publicado recurso: logo.jpg"
-}
-
-# Subir el reporte (RDL)
 $rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\Smoke_detailed.rdl"
-if (-not (Test-Path $rdl)) { throw "No existe el RDL de prueba: $rdl" }
 
+# Recurso (imagen)
 Write-RsCatalogItem `
   -ReportServerUri $ApiUrl `
-  -Path $rdl `                    # ruta local al .rdl
-  -RsFolder $TargetFolder `
-  -Name "Smoke_detailed" `        # nombre visible en SSRS (opcional)
+  -Path      $img            `  # ruta LOCAL de la imagen
+  -RsFolder  $TargetFolder   `  # carpeta en SSRS (ej: /Apps/Smoke)
   -Overwrite `
   -Credential $cred | Out-Null
 
-Write-Host "Publicado reporte: Smoke_detailed"
+# Reporte (RDL)
+Write-RsCatalogItem `
+  -ReportServerUri $ApiUrl `
+  -Path      $rdl            `  # ruta LOCAL del .rdl
+  -RsFolder  $TargetFolder   `  # carpeta en SSRS (ej: /Apps/Smoke)
+  -Name      "Smoke_detailed" `
+  -Overwrite `
+  -Credential $cred | Out-Null
+
+
 
 # 7) (Opcional) Vincular DataSource compartido si tu RDL lo requiere
 # Set-RsDataSourceReference -ReportServerUri $ApiUrl -Path "$TargetFolder/hello_world" `
