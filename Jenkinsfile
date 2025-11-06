@@ -18,50 +18,64 @@ pipeline {
         }
         }
 
-    stage('Deploy SSRS') {
-    steps {
-        powershell '''
-        $ErrorActionPreference = "Stop"
-        $ProgressPreference = "SilentlyContinue"
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+stage('Deploy SSRS') {
+  steps {
+    powershell '''
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-        Write-Host "WORKSPACE: $env:WORKSPACE"
+      Write-Host "WORKSPACE: $env:WORKSPACE"
 
-        # Rutas
-        $script   = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
-        $origen   = Join-Path $env:WORKSPACE "ssrs\\reports\\RDL\\smoke\\Smoke_detailed.rdl"   # <--- aquí está tu RDL
-        $destino  = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\Smoke_detailed.rdl"         # <--- lo que espera el .ps1
+      # Rutas
+      $script   = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
+      $origen   = Join-Path $env:WORKSPACE "ssrs\\reports\\RDL\\smoke\\Smoke_detailed.rdl"
+      $destino  = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\Smoke_detailed.rdl"
 
-        if (-not (Test-Path $script))  { throw "No encuentro el script: $script" }
-        if (-not (Test-Path $origen))  { throw "No encuentro el RDL de origen: $origen" }
+      if (-not (Test-Path $script))  { throw "No encuentro el script: $script" }
+      if (-not (Test-Path $origen))  { throw "No encuentro el RDL de origen: $origen" }
 
-        New-Item -ItemType Directory -Force -Path (Split-Path $destino) | Out-Null
-        Copy-Item $origen $destino -Force
-        Write-Host "Copiado RDL a: $destino"
+      New-Item -ItemType Directory -Force -Path (Split-Path $destino) | Out-Null
+      Copy-Item $origen $destino -Force
+      Write-Host "Copiado RDL a: $destino"
 
-        # Bootstrap sin prompts (misma sesión)
-        if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+      # --- Bootstrap sin prompts, instalando GLOBALMENTE ---
+      if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+      }
+
+      try {
+        $repo = Get-PSRepository -Name PSGallery -ErrorAction Stop
+        if ($repo.InstallationPolicy -ne "Trusted") {
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
         }
-        if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-            Register-PSRepository -Default -ErrorAction SilentlyContinue
-        }
-        if ((Get-PSRepository -Name PSGallery).InstallationPolicy -ne "Trusted") {
-            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-        }
-        if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
-            Install-Module ReportingServicesTools -Scope CurrentUser -Force -AllowClobber -Confirm:$false
-        }
-        Import-Module ReportingServicesTools -Force
+      } catch {
+        Register-PSRepository -Default -ErrorAction SilentlyContinue
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+      }
 
-        # Ejecutar el deploy (tu .ps1 ya apunta a Smoke_detailed.rdl)
-        & $script `
-            -PortalUrl  "http://desktop-p7l4ng4/Reports" `
-            -ApiUrl     "http://desktop-p7l4ng4/ReportServer" `
-            -TargetFolder "/Apps/Smoke"
-        '''
-    }
-    }
+      # Instalar para todos los usuarios (evita perfil SYSTEM raro)
+      $globalModules = "$env:ProgramFiles\\WindowsPowerShell\\Modules"
+      if (-not (Test-Path $globalModules)) { New-Item -Type Directory -Path $globalModules | Out-Null }
+
+      if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
+        Install-Module ReportingServicesTools -Scope AllUsers -Force -AllowClobber -Confirm:$false
+      }
+
+      # Importar y validar
+      Import-Module ReportingServicesTools -Force -ErrorAction Stop
+      $cmd = Get-Command Get-RsFolder -ErrorAction Stop
+      Write-Host "Módulo cargado OK desde: $($cmd.Source)"
+
+      # --- Ejecutar el deploy (misma sesión) ---
+      & $script `
+        -PortalUrl  "http://desktop-p7l4ng4/Reports" `
+        -ApiUrl     "http://desktop-p7l4ng4/ReportServer" `
+        -TargetFolder "/Apps/Smoke"
+    '''
+  }
+}
+
 
 
 
