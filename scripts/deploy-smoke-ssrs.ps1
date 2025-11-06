@@ -22,6 +22,35 @@ if ($User -and $Pass) {
   $cred = New-Object System.Management.Automation.PSCredential($User,$sec)
 }
 
+function Normalize-RsPath {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  # Reemplaza \ por /, quita espacios, fuerza raíz
+  $p = $Path.Trim().Replace('\','/')
+  if (-not $p.StartsWith('/')) { $p = '/' + $p }
+  # quita doble slash
+  $p = $p -replace '/{2,}','/'
+  # quita trailing slash salvo raíz
+  if ($p.Length -gt 1 -and $p.EndsWith('/')) { $p = $p.TrimEnd('/') }
+  return $p
+}
+
+function Get-RsParentPath {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  $p = Normalize-RsPath $Path
+  if ($p -eq '/') { return $null }                # raíz no tiene padre
+  $lastSlash = $p.LastIndexOf('/')
+  if ($lastSlash -le 0) { return '/' }            # p.ej. '/Apps' -> '/'
+  return $p.Substring(0, $lastSlash)
+}
+
+function Get-RsLeafName {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  $p = Normalize-RsPath $Path
+  if ($p -eq '/') { return '/' }
+  $lastSlash = $p.LastIndexOf('/')
+  return $p.Substring($lastSlash + 1)
+}
+
 # 3) Helper: asegurar carpeta en SSRS
 function Test-RsFolderExists {
   param(
@@ -29,8 +58,12 @@ function Test-RsFolderExists {
     [Parameter(Mandatory=$true)][string]$Path,
     [Parameter()][pscredential]$Credential
   )
-  $parent = Split-Path $Path
-  $leaf   = Split-Path $Path -Leaf
+  $p      = Normalize-RsPath $Path
+  $parent = Get-RsParentPath $p
+  $leaf   = Get-RsLeafName   $p
+
+  if (-not $parent) { return $true }  # raíz
+
   $items = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $parent -Credential $Credential -ErrorAction SilentlyContinue
   return $items | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq $leaf }
 }
@@ -41,19 +74,26 @@ function Ensure-Folder {
     [Parameter(Mandatory=$true)][string]$Path,
     [Parameter()][pscredential]$Credential
   )
-  if (-not (Test-RsFolderExists -ApiUrl $ApiUrl -Path $Path -Credential $Credential)) {
-    $parent = Split-Path $Path
-    if (-not (Get-RsFolderContent -ReportServerUri $ApiUrl -Path $parent -Credential $Credential -ErrorAction SilentlyContinue)) {
-      throw "La carpeta padre '$parent' no existe; créala primero o usa una ruta válida."
+
+  $p      = Normalize-RsPath $Path
+  if ($p -eq '/') { return }  # nada que crear
+
+  if (-not (Test-RsFolderExists -ApiUrl $ApiUrl -Path $p -Credential $Credential)) {
+    $parent = Get-RsParentPath $p
+    if (-not $parent) { $parent = '/' }
+    # Asegura que el padre exista (recursivo)
+    if ($parent -ne '/' -and -not (Test-RsFolderExists -ApiUrl $ApiUrl -Path $parent -Credential $Credential)) {
+      Ensure-Folder -ApiUrl $ApiUrl -Path $parent -Credential $Credential
     }
-    New-RsFolder -ReportServerUri $ApiUrl -Path $parent -Name (Split-Path $Path -Leaf) -Credential $Credential | Out-Null
-    Write-Host "Creada carpeta: $Path"
+    New-RsFolder -ReportServerUri $ApiUrl -Path $parent -Name (Get-RsLeafName $p) -Credential $Credential | Out-Null
+    Write-Host "Creada carpeta: $p"
   } else {
-    Write-Host "OK carpeta: $Path"
+    Write-Host "OK carpeta: $p"
   }
 }
 
 # 4) Crear/validar carpeta destino
+$TargetFolder = Normalize-RsPath $TargetFolder
 Ensure-Folder -ApiUrl $ApiUrl -Path $TargetFolder -Credential $cred
 
 # 5) Publicar recurso opcional

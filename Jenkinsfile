@@ -65,7 +65,7 @@ stage('Deploy SSRS') {
       $psd1 = Get-ChildItem -Path $modPath.FullName -Filter *.psd1 -Recurse | Select-Object -First 1 -Expand FullName
       if (-not (Test-Path $psd1)) { throw "No encontré el archivo .psd1 de $modName bajo $($modPath.FullName)" }
 
-      Import-Module $psd1 -Force -ErrorAction Stop
+      Import-Module $psd1 -Force -DisableNameChecking -ErrorAction Stop
       # valida con un cmdlet estable del módulo
       $cmd = Get-Command New-RsFolder -ErrorAction Stop
       Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
