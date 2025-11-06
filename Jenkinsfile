@@ -3,31 +3,20 @@ pipeline {
 
   stages {
 
-    stage('Checkout - Automation Scripts') {
-      steps {
-        dir('automation') {
-          checkout([
-            $class: 'GitSCM',
-            branches: [[name: '*/main']],
-            userRemoteConfigs: [[url: 'https://github.com/leo-morales182/Jenkins_SQL_Automation.git',
-            credentialsId: 'github-pat-leo']]
-          ])
-        }
-      }
-    }
-
     stage('Checkout - SSRS Reports') {
-      steps {
-        dir('ssrs') {
-          checkout([
-            $class: 'GitSCM',
-            branches: [[name: '*/main']],
-            userRemoteConfigs: [[url: 'https://github.com/leo-morales182/ssrs_projects.git',
-            credentialsId: 'github-pat-leo']]
-          ])
+        steps {
+            dir('ssrs') {
+            checkout([
+                $class: 'GitSCM',
+                branches: [[name: '*/main']],  // ajusta si usas otra rama
+                userRemoteConfigs: [[
+                url: 'https://github.com/leo-morales182/ssrs_projects.git',
+                credentialsId: 'github-pat-leo'
+                ]]
+            ])
+            }
         }
-      }
-    }
+        }
 
     stage('Deploy SSRS') {
       steps {
