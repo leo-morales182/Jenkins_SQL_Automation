@@ -18,46 +18,51 @@ pipeline {
         }
         }
 
-stage('Deploy SSRS') {
-  steps {
-    powershell '''
-      $ErrorActionPreference = "Stop"
-      $ProgressPreference = "SilentlyContinue"
-      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    stage('Deploy SSRS') {
+    steps {
+        powershell '''
+        $ErrorActionPreference = "Stop"
+        $ProgressPreference = "SilentlyContinue"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-      # Mostrar workspace y ubicar script
-      Write-Host "WORKSPACE: $env:WORKSPACE"
-      $script = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
-      if (-not (Test-Path $script)) { throw "No encuentro el script: $script" }
+        Write-Host "WORKSPACE: $env:WORKSPACE"
 
-      # Copiar RDL de prueba a la ruta estándar que espera el script
-      $origen  = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\Smoke_detailed.rdl"   # <-- ajusta si usas otro nombre
-      $destino = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\Smoke_detailed.rdl"   # ya lo tienes en esa ruta en tu repo
-      if (-not (Test-Path $origen)) { throw "No encuentro el RDL: $origen" }
+        # Rutas
+        $script   = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
+        $origen   = Join-Path $env:WORKSPACE "ssrs\\reports\\RDL\\smoke\\Smoke_detailed.rdl"   # <--- aquí está tu RDL
+        $destino  = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\Smoke_detailed.rdl"         # <--- lo que espera el .ps1
 
-      # Bootstrap sin prompts (misma sesión)
-      if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
-        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-      }
-      if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-        Register-PSRepository -Default -ErrorAction SilentlyContinue
-      }
-      if ((Get-PSRepository -Name PSGallery).InstallationPolicy -ne "Trusted") {
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-      }
-      if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
-        Install-Module ReportingServicesTools -Scope CurrentUser -Force -AllowClobber -Confirm:$false
-      }
-      Import-Module ReportingServicesTools -Force
+        if (-not (Test-Path $script))  { throw "No encuentro el script: $script" }
+        if (-not (Test-Path $origen))  { throw "No encuentro el RDL de origen: $origen" }
 
-      # Ejecutar el script (mismo proceso/sesión, el módulo ya está importado)
-      & $script `
-        -PortalUrl  "http://desktop-p7l4ng4/Reports" `
-        -ApiUrl     "http://desktop-p7l4ng4/ReportServer" `
-        -TargetFolder "/Apps/Smoke"
-    '''
-  }
-}
+        New-Item -ItemType Directory -Force -Path (Split-Path $destino) | Out-Null
+        Copy-Item $origen $destino -Force
+        Write-Host "Copiado RDL a: $destino"
+
+        # Bootstrap sin prompts (misma sesión)
+        if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+        }
+        if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default -ErrorAction SilentlyContinue
+        }
+        if ((Get-PSRepository -Name PSGallery).InstallationPolicy -ne "Trusted") {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        }
+        if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
+            Install-Module ReportingServicesTools -Scope CurrentUser -Force -AllowClobber -Confirm:$false
+        }
+        Import-Module ReportingServicesTools -Force
+
+        # Ejecutar el deploy (tu .ps1 ya apunta a Smoke_detailed.rdl)
+        & $script `
+            -PortalUrl  "http://desktop-p7l4ng4/Reports" `
+            -ApiUrl     "http://desktop-p7l4ng4/ReportServer" `
+            -TargetFolder "/Apps/Smoke"
+        '''
+    }
+    }
+
 
 
         }
