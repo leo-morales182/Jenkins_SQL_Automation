@@ -23,22 +23,38 @@ if ($User -and $Pass) {
 }
 
 # 3) Helper: asegurar carpeta en SSRS
-function Ensure-Folder($path) {
-  $exists = Get-RsFolder -ReportServerUri $ApiUrl -Path $path -Credential $cred -ErrorAction SilentlyContinue
-  if (-not $exists) {
-    $parent = Split-Path $path
-    if (-not (Get-RsFolder -ReportServerUri $ApiUrl -Path $parent -Credential $cred -ErrorAction SilentlyContinue)) {
+function Test-RsFolderExists {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][string]$Path,
+    [Parameter()][pscredential]$Credential
+  )
+  $parent = Split-Path $Path
+  $leaf   = Split-Path $Path -Leaf
+  $items = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $parent -Credential $Credential -ErrorAction SilentlyContinue
+  return $items | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq $leaf }
+}
+
+function Ensure-Folder {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][string]$Path,
+    [Parameter()][pscredential]$Credential
+  )
+  if (-not (Test-RsFolderExists -ApiUrl $ApiUrl -Path $Path -Credential $Credential)) {
+    $parent = Split-Path $Path
+    if (-not (Get-RsFolderContent -ReportServerUri $ApiUrl -Path $parent -Credential $Credential -ErrorAction SilentlyContinue)) {
       throw "La carpeta padre '$parent' no existe; créala primero o usa una ruta válida."
     }
-    New-RsFolder -ReportServerUri $ApiUrl -Path $parent -Name (Split-Path $path -Leaf) -Credential $cred | Out-Null
-    Write-Host "Creada carpeta: $path"
+    New-RsFolder -ReportServerUri $ApiUrl -Path $parent -Name (Split-Path $Path -Leaf) -Credential $Credential | Out-Null
+    Write-Host "Creada carpeta: $Path"
   } else {
-    Write-Host "OK carpeta: $path"
+    Write-Host "OK carpeta: $Path"
   }
 }
 
 # 4) Crear/validar carpeta destino
-Ensure-Folder $TargetFolder
+Ensure-Folder -ApiUrl $ApiUrl -Path $TargetFolder -Credential $cred
 
 # 5) Publicar recurso opcional
 $img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
