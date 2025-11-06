@@ -70,11 +70,33 @@ stage('Deploy SSRS') {
       $cmd = Get-Command New-RsFolder -ErrorAction Stop
       Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
 
-      # --- Ejecutar el deploy (misma sesión) ---
-      & $script `
-        -PortalUrl  "http://desktop-p7l4ng4/Reports" `
-        -ApiUrl     "http://desktop-p7l4ng4/ReportServer" `
-        -TargetFolder "/Apps/Smoke"
+    
+    # === Asegurar carpetas en SSRS paso a paso ===
+    $api = "http://desktop-p7l4ng4/ReportServer"   # ajusta si tu API es otra
+
+    # 1) asegurar /Apps
+    $rootChildren = Get-RsFolderContent -ReportServerUri $api -Path '/' -ErrorAction SilentlyContinue
+    if (-not ($rootChildren | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Apps' })) {
+    New-RsFolder -ReportServerUri $api -Path '/' -Name 'Apps' -ErrorAction Stop | Out-Null
+    Write-Host "Creada carpeta: /Apps"
+    } else {
+    Write-Host "OK carpeta existe: /Apps"
+    }
+
+    # 2) asegurar /Apps/Smoke
+    $appsChildren = Get-RsFolderContent -ReportServerUri $api -Path '/Apps' -ErrorAction SilentlyContinue
+    if (-not ($appsChildren | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Smoke' })) {
+    New-RsFolder -ReportServerUri $api -Path '/Apps' -Name 'Smoke' -ErrorAction Stop | Out-Null
+    Write-Host "Creada carpeta: /Apps/Smoke"
+    } else {
+    Write-Host "OK carpeta existe: /Apps/Smoke"
+    }
+
+    # (ahora sí) correr tu script apuntando a /Apps/Smoke
+    & $script `
+    -PortalUrl  "http://desktop-p7l4ng4/Reports" `
+    -ApiUrl     $api `
+    -TargetFolder "/Apps/Smoke"
     '''
   }
 }
