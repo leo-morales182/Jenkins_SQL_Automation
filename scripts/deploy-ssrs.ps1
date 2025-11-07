@@ -2,6 +2,7 @@ param(
   [Parameter(Mandatory=$true)] [string]$PortalUrl,      # ej: http://localhost/Reports  (solo informativo)
   [Parameter(Mandatory=$true)] [string]$ApiUrl,         # ej: http://localhost/ReportServer
   [Parameter()] [string]$TargetBase = "/Apps",          # carpeta raíz en SSRS
+  [string]$RepoRoot,
   [string]$User,
   [string]$Pass
 )
@@ -16,6 +17,15 @@ if ($User -and $Pass) {
   $sec = ConvertTo-SecureString $Pass -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
 }
+
+if (-not $RepoRoot -or -not (Test-Path $RepoRoot)) {
+  $candidate1 = Join-Path $PSScriptRoot "..\reports"
+  $candidate2 = Join-Path $env:WORKSPACE "ssrs\reports"
+  if     (Test-Path $candidate1) { $RepoRoot = $candidate1 }
+  elseif (Test-Path $candidate2) { $RepoRoot = $candidate2 }
+  else  { throw "No encuentro carpeta 'reports' en: `n - $candidate1 `n - $candidate2" }
+}
+Write-Host "RepoRoot: $RepoRoot"
 
 # --- Helpers SSRS ---
 

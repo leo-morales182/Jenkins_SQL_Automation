@@ -97,8 +97,9 @@ pipeline {
             } else { Write-Host "OK carpeta existe: /Apps/Smoke" }
 
             # === Invocar tu script con parámetros en una sola línea ===
+            $repoRoot = Join-Path $env:WORKSPACE "ssrs\\reports"
 
-            & "$script" -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps"
+            & $script -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps" -RepoRoot $repoRoot
             '''
         }
     }
