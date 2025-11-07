@@ -232,7 +232,6 @@ function Publish-Reports-And-MapDS {
 # --- ORQUESTADOR ---
 
 $TargetBase = Normalize-RsPath $TargetBase
-$RepoRoot   = Join-Path $PSScriptRoot "..\reports"
 
 # 0) estructura base
 Ensure-RsPath -ApiUrl $ApiUrl -Path $TargetBase
