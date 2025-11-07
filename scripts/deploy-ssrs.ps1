@@ -288,5 +288,7 @@ foreach ($proj in $projects) {
   ProjectRsFolder    = $projRsFolder
   SharedDsFolder     = "$TargetBase/Shared/Data Sources"
   }
+
+  Write-Host "mapArgs keys: $(($mapArgs.Keys) -join ', ')"
   Publish-Reports-And-MapDS @mapArgs
 }
