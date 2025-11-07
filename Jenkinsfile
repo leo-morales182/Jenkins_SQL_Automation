@@ -93,15 +93,11 @@ pipeline {
 
             if (-not (Get-RsFolderContent -ReportServerUri $api -Path '/Apps' -ErrorAction SilentlyContinue | ? { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Smoke' })) {
                 New-RsFolder -ReportServerUri $api -Path '/Apps' -Name 'Smoke' -ErrorAction Stop | Out-Null
-                Write-Host "Creada carpeta: /Apps/Smoke"
-            } else { Write-Host "OK carpeta existe: /Apps/Smoke" }
+                Write-Host "Creada carpeta: /Apps"
+            } else { Write-Host "OK carpeta existe: /Apps" }
 
             # === Invocar tu script con parámetros en una sola línea ===
             $repoRoot = Join-Path $env:WORKSPACE "ssrs\\reports"
-
-            Write-Host "Enumerando proyectos en: $RepoRoot"
-            Get-ChildItem -Path $RepoRoot -Directory | Select-Object Name,FullName | Format-Table -Auto
-
 
             & $script -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps" -RepoRoot $repoRoot
             '''

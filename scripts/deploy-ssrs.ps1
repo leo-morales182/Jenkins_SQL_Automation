@@ -14,9 +14,10 @@ Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
 # --- Credenciales opcionales ---
 $cred = $null
 if ($User -and $Pass) {
-  $sec = ConvertTo-SecureString $Pass -AsPlainText -Force
+  $sec  = ConvertTo-SecureString $Pass -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
 }
+$script:cred = $cred
 
 if (-not $RepoRoot -or -not (Test-Path $RepoRoot)) {
   $candidate1 = Join-Path $PSScriptRoot "..\reports"
@@ -153,12 +154,18 @@ function Get-RdlDataSourceRefs {
     if ($nodes -and $nodes.Count -gt 0) {
       $out = @()
       foreach ($n in $nodes) {
-        # name puede ser atributo o elemento, cubrimos ambos
-        $name = $n.Attributes["Name"]?.Value
-        if (-not $name) { $name = ($n.SelectSingleNode("@Name")?.Value) }
+        # Nombre puede ser atributo @Name
+        $name = $null
+        if ($n.Attributes -and $n.Attributes["Name"]) {
+          $name = $n.Attributes["Name"].Value
+        } else {
+          $attrNode = $n.SelectSingleNode("@Name")
+          if ($attrNode) { $name = $attrNode.Value }
+        }
 
-        $refNode = $n.SelectSingleNode("d:DataSourceReference", $nsm)
+        # Referencia a shared DS (DataSourceReference)
         $ref = $null
+        $refNode = $n.SelectSingleNode("d:DataSourceReference", $nsm)
         if ($refNode) { $ref = $refNode.InnerText }
 
         $out += [pscustomobject]@{ Name = $name; Reference = $ref }
@@ -169,7 +176,6 @@ function Get-RdlDataSourceRefs {
 
   throw "No pude leer DataSources del RDL (namespace no reconocido o estructura inesperada)."
 }
-
 
 function Publish-Reports-And-MapDS {
   param(
@@ -194,6 +200,8 @@ function Publish-Reports-And-MapDS {
     Write-Host "Publicado RDL: $($rdl.Name) en $ProjectRsFolder"
     # 2) Re-mapear DS por nombre o path
     $dsList = Get-RdlDataSourceRefs -RdlPath $rdl.FullName
+    Write-Host "  - DS detectados en $($rdl.Name): " ($dsList | ForEach-Object { "$($_.Name) -> $($_.Reference)" } | Out-String)
+
     foreach ($ds in $dsList) {
       if (-not $ds.Reference) {
         Write-Host "  - DataSource '$($ds.Name)' es embebido. (se deja embebido)"
