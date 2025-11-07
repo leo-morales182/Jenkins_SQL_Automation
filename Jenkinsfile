@@ -99,6 +99,10 @@ pipeline {
             # === Invocar tu script con parámetros en una sola línea ===
             $repoRoot = Join-Path $env:WORKSPACE "ssrs\\reports"
 
+            Write-Host "Enumerando proyectos en: $RepoRoot"
+            Get-ChildItem -Path $RepoRoot -Directory | Select-Object Name,FullName | Format-Table -Auto
+
+
             & $script -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps" -RepoRoot $repoRoot
             '''
         }
