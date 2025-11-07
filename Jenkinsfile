@@ -9,16 +9,18 @@ pipeline {
     }
 
     stage('Checkout - Automation Scripts') {
-      steps {
-        checkout([
-          $class: 'GitSCM',
-          branches: [[name: '*/main']],
-          userRemoteConfigs: [[
-            url: 'https://github.com/leo-morales182/Jenkins_SQL_Automation.git',
-            credentialsId: 'Github_leo_morales_credentials'
-          ]]
-        ])
-      }
+        steps {
+            dir('automation') {
+            checkout([
+                $class: 'GitSCM',
+                branches: [[name: '*/main']],
+                userRemoteConfigs: [[
+                url: 'https://github.com/leo-morales182/Jenkins_SQL_Automation.git',
+                credentialsId: 'Github_leo_morales_credentials'
+                ]]
+            ])
+            }
+        }
     }
 
     stage('Checkout - SSRS Reports') {
@@ -46,7 +48,11 @@ pipeline {
             Write-Host "WORKSPACE: $env:WORKSPACE"
 
             # Rutas
-            $script   = Join-Path $env:WORKSPACE "scripts\\deploy-ssrs.ps1"
+            $script = Join-Path $env:WORKSPACE "automation\\scripts\\deploy-ssrs.ps1"
+
+            if (-not (Test-Path $script)) {
+                 throw "No encuentro el script: $script. Verifica la ruta y el nombre del archivo en el repo Jenkins_SQL_Automation."
+            }
 
             # --- Bootstrap PSGallery/NuGet sin prompts ---
             if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
@@ -91,7 +97,8 @@ pipeline {
             } else { Write-Host "OK carpeta existe: /Apps/Smoke" }
 
             # === Invocar tu script con parámetros en una sola línea ===
-            & "$env:WORKSPACE\\scripts\\deploy-ssrs.ps1" -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps"
+
+            & "$script" -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps"
             '''
         }
     }
