@@ -283,8 +283,8 @@ foreach ($proj in $projects) {
   Publish-Resources  -ApiUrl $ApiUrl -LocalFolder (Join-Path $proj.FullName "Resources")   -RsFolder "$projRsFolder/Resources"
 
   Publish-Reports-And-MapDS 
-    -ApiUrl $ApiUrl 
-    -LocalReportsFolder (Join-Path $proj.FullName "Reports") 
-    -ProjectRsFolder $projRsFolder 
+    -ApiUrl $ApiUrl `
+    -LocalReportsFolder (Join-Path $proj.FullName "Reports") `
+    -ProjectRsFolder $projRsFolder `
     -SharedDsFolder "$TargetBase/Shared/Data Sources"
 }
