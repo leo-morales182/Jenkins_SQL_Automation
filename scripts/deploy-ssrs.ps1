@@ -138,37 +138,38 @@ function Publish-DataSets {
 function Get-RdlDataSourceRefs {
   param([Parameter(Mandatory=$true)][string]$RdlPath)
 
-  [xml]$x = Get-Content $RdlPath
-
-  # namespaces posibles
-  $namespaces = @(
-    @{ pfx='d'; uri='http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition' },
-    @{ pfx='d'; uri='http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition' }
+  [xml]$x = Get-Content -Raw $RdlPath
+  $nsUris = @(
+    "http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition",
+    "http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition",
+    "http://schemas.microsoft.com/sqlserver/reporting/2017/01/reportdefinition"
   )
 
-  $nodes = $null
-  foreach ($ns in $namespaces) {
-    $nm = New-Object System.Xml.XmlNamespaceManager($x.NameTable)
-    $nm.AddNamespace($ns.pfx, $ns.uri) | Out-Null
-    $nodes = $x.SelectNodes("//d:Report/d:DataSources/d:DataSource", $nm)
-    if ($nodes -and $nodes.Count -gt 0) { break }
-  }
+  foreach ($nsUri in $nsUris) {
+    $nsm = New-Object System.Xml.XmlNamespaceManager($x.NameTable)
+    $nsm.AddNamespace("d", $nsUri)
 
-  $out = @()
-  if ($nodes) {
-    foreach ($n in $nodes) {
-      $name = $n.Name
-      # si existe DataSourceReference como string, tomarlo
-      $ref = $n.DataSourceReference
-      if ($ref) {
-        $out += [pscustomobject]@{ Name=$name; Reference=($ref.'#text') }
-      } else {
-        $out += [pscustomobject]@{ Name=$name; Reference=$null }  # embebido
+    $nodes = $x.SelectNodes("//d:Report/d:DataSources/d:DataSource", $nsm)
+    if ($nodes -and $nodes.Count -gt 0) {
+      $out = @()
+      foreach ($n in $nodes) {
+        # name puede ser atributo o elemento, cubrimos ambos
+        $name = $n.Attributes["Name"]?.Value
+        if (-not $name) { $name = ($n.SelectSingleNode("@Name")?.Value) }
+
+        $refNode = $n.SelectSingleNode("d:DataSourceReference", $nsm)
+        $ref = $null
+        if ($refNode) { $ref = $refNode.InnerText }
+
+        $out += [pscustomobject]@{ Name = $name; Reference = $ref }
       }
+      return $out
     }
   }
-  return $out
+
+  throw "No pude leer DataSources del RDL (namespace no reconocido o estructura inesperada)."
 }
+
 
 function Publish-Reports-And-MapDS {
   param(
@@ -191,41 +192,60 @@ function Publish-Reports-And-MapDS {
     if ($script:cred) { $pubArgs.Credential = $script:cred }
     Write-RsCatalogItem @pubArgs | Out-Null
     Write-Host "Publicado RDL: $($rdl.Name) en $ProjectRsFolder"
-
-    # Remapeo de DS
+    # 2) Re-mapear DS por nombre o path
     $dsList = Get-RdlDataSourceRefs -RdlPath $rdl.FullName
     foreach ($ds in $dsList) {
       if (-not $ds.Reference) {
-        Write-Host "  - DS '$($ds.Name)' embebido (sin remap)."
+        Write-Host "  - DataSource '$($ds.Name)' es embebido. (se deja embebido)"
         continue
       }
 
-      $reportItemPath   = (Normalize-RsPath ("$ProjectRsFolder/" + [System.IO.Path]::GetFileNameWithoutExtension($rdl.Name)))
-      $candidateProject = (Normalize-RsPath ("$ProjectRsFolder/" + $ds.Reference))
-      $candidateShared  = (Normalize-RsPath ("$SharedDsFolder/" + $ds.Reference))
+      $reportItemPath = "$ProjectRsFolder/" + [System.IO.Path]::GetFileNameWithoutExtension($rdl.Name)
 
-      # ¿existe en proyecto?
-      $getArgs = @{ ReportServerUri = $ApiUrl; Path = $candidateProject; ErrorAction = 'SilentlyContinue' }
-      if ($script:cred) { $getArgs.Credential = $script:cred }
-      $existsProject = Get-RsCatalogItem @getArgs
-
-      if ($existsProject) {
-        $targetRef = $candidateProject
+      # Si el RDL ya trae path absoluto (/Apps/...): úsalo directo
+      if ($ds.Reference.StartsWith('/')) {
+        $targetRef = $ds.Reference
       } else {
-        $targetRef = $candidateShared
+        # Solo nombre lógico -> intenta proyecto y luego Shared
+        $candidateProject = "$ProjectRsFolder/$($ds.Reference)"
+        $candidateShared  = "$SharedDsFolder/$($ds.Reference)"
+
+        # Búsqueda tolerantemente (case-insensitive) preguntando al server
+        $existsProject = Get-RsCatalogItem -ReportServerUri $ApiUrl -Path $candidateProject -ErrorAction SilentlyContinue
+        if (-not $existsProject) {
+          # algunos .rds cambian de nombre (p.ej., Products vs products_SDS) -> intenta por lista del folder
+          $projItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $ProjectRsFolder -ErrorAction SilentlyContinue
+          $match = $projItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
+          if ($match) { $candidateProject = "$ProjectRsFolder/$($match.Name)" ; $existsProject = $true }
+        }
+
+        $existsShared = Get-RsCatalogItem -ReportServerUri $ApiUrl -Path $candidateShared -ErrorAction SilentlyContinue
+        if (-not $existsShared) {
+          $sharedItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $SharedDsFolder -ErrorAction SilentlyContinue
+          $match = $sharedItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
+          if ($match) { $candidateShared = "$SharedDsFolder/$($match.Name)" ; $existsShared = $true }
+        }
+
+        if ($existsProject)      { $targetRef = $candidateProject }
+        elseif ($existsShared)   { $targetRef = $candidateShared }
+        else {
+          Write-Warning "  - No encontré DS publicado para '$($ds.Name)' (ref='$($ds.Reference)') en '$ProjectRsFolder' ni en '$SharedDsFolder'."
+          continue
+        }
       }
 
-      $mapArgs = @{
+      # Aplica la referencia al reporte
+      Set-RsDataSourceReference @{
         ReportServerUri = $ApiUrl
         Path           = $reportItemPath
         DataSourceName = $ds.Name
         RsItem         = $targetRef
-      }
-      if ($script:cred) { $mapArgs.Credential = $script:cred }
-      Set-RsDataSourceReference @mapArgs | Out-Null
+      } | Out-Null
 
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
     }
+
+
   }
 }
 
