@@ -203,7 +203,6 @@ function Publish-Reports-And-MapDS {
     Write-Host "  - DS detectados en $($rdl.Name): " ($dsList | ForEach-Object { "$($_.Name) -> $($_.Reference)" } | Out-String)
 
     foreach ($ds in $dsList) {
-      Write-Host "Salida 1"
       
       if (-not $ds.Reference) {
         Write-Host "  - DataSource '$($ds.Name)' es embebido. (se deja embebido)"
@@ -217,13 +216,14 @@ function Publish-Reports-And-MapDS {
         Write-Host "Path absoluto"
         $targetRef = $ds.Reference
       } else {
-        Write-Host "NO path absoluto"
         # Solo nombre lógico -> intenta proyecto y luego Shared
         $candidateProject = "$ProjectRsFolder/$($ds.Reference)"
         $candidateShared  = "$SharedDsFolder/$($ds.Reference)"
-
+        
         # Búsqueda tolerantemente (case-insensitive) preguntando al server
+        Write-Host "Pasó 1"
         $existsProject = Get-RsCatalogItem -ReportServerUri $ApiUrl -Path $candidateProject -ErrorAction SilentlyContinue
+        Write-Host "Pasó 2"
         if (-not $existsProject) {
           # algunos .rds cambian de nombre (p.ej., Products vs products_SDS) -> intenta por lista del folder
           $projItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $ProjectRsFolder -ErrorAction SilentlyContinue
