@@ -8,6 +8,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
 
 # --- Credenciales opcionales ---
 $cred = $null
@@ -49,7 +50,11 @@ function Ensure-RsPath {
       Write-Host "Creada carpeta: $current/$seg"
     }
 
-    $current = ($current -eq '/') ? "/$seg" : "$current/$seg"
+    if ($current -eq '/') {
+      $current = "/$seg"
+    } else {
+      $current = "$current/$seg"
+    }
   }
 }
 
@@ -194,7 +199,11 @@ function Publish-Reports-And-MapDS {
       if ($script:cred) { $getArgs.Credential = $script:cred }
       $existsProject = Get-RsCatalogItem @getArgs
 
-      $targetRef = $existsProject ? $candidateProject : $candidateShared
+      if ($existsProject) {
+        $targetRef = $candidateProject
+      } else {
+        $targetRef = $candidateShared
+      }
 
       $mapArgs = @{
         ReportServerUri = $ApiUrl
