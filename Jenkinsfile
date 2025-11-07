@@ -85,7 +85,9 @@ pipeline {
             Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
 
             Remove-Item alias:Set-RsDataSourceReference -ErrorAction SilentlyContinue
-            Remove-Item alias:Set-RsDataSource        -ErrorAction SilentlyContinue
+            Remove-Item alias:Set-RsDataSource         -ErrorAction SilentlyContinue
+            Remove-Item alias:Set-RsDataSourceReference2 -ErrorAction SilentlyContinue
+
 
             # Asegurar carpetas base mínimas (si quieres mantener este tramo aquí)
             $api = "http://desktop-p7l4ng4/ReportServer"

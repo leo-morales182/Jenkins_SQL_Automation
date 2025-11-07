@@ -190,6 +190,19 @@ function Publish-Reports-And-MapDS {
   # Forzar el cmdlet del módulo correcto para evitar alias/confusiones
   $SetDsRef = Get-Command 'ReportingServicesTools\Set-RsDataSourceReference' -ErrorAction Stop
 
+  # --- Diagnóstico y fijado del cmdlet correcto ---
+  $cmds = Get-Command Set-RsDataSourceReference -All
+  Write-Host "Set-RsDataSourceReference encontrados:"
+  $cmds | ForEach-Object { Write-Host ("  - {0} :: {1} ({2})" -f $_.Name, $_.ModuleName, $_.CommandType) }
+
+  $SetDsRef = Get-Command -Name Set-RsDataSourceReference -Module ReportingServicesTools -CommandType Cmdlet -ErrorAction Stop
+  Write-Host ("Usando: {0} :: {1}" -f $SetDsRef.Name, $SetDsRef.ModuleName)
+
+  # Si aún existiera algún alias, bórralo aquí también (doble seguro)
+  Remove-Item alias:Set-RsDataSourceReference -ErrorAction SilentlyContinue
+  Remove-Item alias:Set-RsDataSource         -ErrorAction SilentlyContinue
+
+
   foreach ($rdl in $rdls) {
     # Publicar el RDL
     $pubArgs = @{
@@ -254,8 +267,7 @@ function Publish-Reports-And-MapDS {
         }
       }
       
-      # Aplica la referencia al reporte
-      # Guardas para evitar binding raro
+      # Guardas
       if ([string]::IsNullOrWhiteSpace($ds.Name)) {
         Write-Warning "  - DataSource con nombre vacío en $($rdl.Name); se omite."
         continue
@@ -265,12 +277,16 @@ function Publish-Reports-And-MapDS {
         continue
       }
 
-      & $SetDsRef @{
-        ReportServerUri = $ApiUrl
-        Path           = $reportItemPath      # /Apps/Proyecto/NombreReporte (sin .rdl)
-        DataSourceName = $ds.Name
-        RsItem         = $targetRef           # p.ej. /Apps/Shared/Data Sources/products_SDS
-      } | Out-Null
+      # Traza mínima para confirmar parámetros
+      Write-Host ("  - Aplicando referencia: Report='{0}'  DSName='{1}'  RsItem='{2}'" -f $reportItemPath, $ds.Name, $targetRef)
+
+      # Llamada 100% calificada al cmdlet correcto del módulo correcto (sin aliases, sin splatting)
+      ReportingServicesTools\Set-RsDataSourceReference `
+        -ReportServerUri $ApiUrl `
+        -Path            $reportItemPath `
+        -DataSourceName  $ds.Name `
+        -RsItem          $targetRef `
+        -ErrorAction     Stop | Out-Null
 
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
     }
