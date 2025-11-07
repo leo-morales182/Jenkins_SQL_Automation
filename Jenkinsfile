@@ -93,9 +93,9 @@ stage('Deploy SSRS') {
     }
 
     # Llamada al archivo .ps1 para el deployment
-    & "$env:WORKSPACE\scripts\deploy-ssrs.ps1" `
-  -PortalUrl "http://localhost/Reports" `
-  -ApiUrl "http://localhost/ReportServer" `
+    & "$env:WORKSPACE\scripts\deploy-ssrs.ps1"
+  -PortalUrl "http://localhost/Reports"
+  -ApiUrl "http://localhost/ReportServer"
   -TargetBase "/Apps"
     '''
   }
