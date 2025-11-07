@@ -221,23 +221,28 @@ function Publish-Reports-And-MapDS {
         $candidateShared  = "$SharedDsFolder/$($ds.Reference)"
         
         # Búsqueda tolerantemente (case-insensitive) preguntando al server
-        Write-Host "Pasó 1"
-        $existsProject = Get-RsCatalogItem -ReportServerUri $ApiUrl -Path $candidateProject -ErrorAction SilentlyContinue
-        Write-Host "Pasó 2"
-        if (-not $existsProject) {
-          # algunos .rds cambian de nombre (p.ej., Products vs products_SDS) -> intenta por lista del folder
-          $projItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $ProjectRsFolder -ErrorAction SilentlyContinue
-          $match = $projItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
-          if ($match) { $candidateProject = "$ProjectRsFolder/$($match.Name)" ; $existsProject = $true }
+        # --- Proyecto ---
+        $projItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $ProjectRsFolder -ErrorAction SilentlyContinue
+        $matchProj = $projItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
+        $existsProject   = $false
+        $candidateProject = "$ProjectRsFolder/$($ds.Reference)"
+        if ($matchProj) {
+          # usa el nombre real (respeta mayúsculas/minúsculas tal como está en el server)
+          $candidateProject = "$ProjectRsFolder/$($matchProj.Name)"
+          $existsProject = $true
         }
 
-        $existsShared = Get-RsCatalogItem -ReportServerUri $ApiUrl -Path $candidateShared -ErrorAction SilentlyContinue
-        if (-not $existsShared) {
-          $sharedItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $SharedDsFolder -ErrorAction SilentlyContinue
-          $match = $sharedItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
-          if ($match) { $candidateShared = "$SharedDsFolder/$($match.Name)" ; $existsShared = $true }
+        # --- Shared ---
+        $sharedItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $SharedDsFolder -ErrorAction SilentlyContinue
+        $matchShared = $sharedItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
+        $existsShared  = $false
+        $candidateShared = "$SharedDsFolder/$($ds.Reference)"
+        if ($matchShared) {
+          $candidateShared = "$SharedDsFolder/$($matchShared.Name)"
+          $existsShared = $true
         }
 
+        # Escoge el targetRef
         if ($existsProject)      { $targetRef = $candidateProject }
         elseif ($existsShared)   { $targetRef = $candidateShared }
         else {
