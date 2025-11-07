@@ -282,14 +282,14 @@ function Publish-Reports-And-MapDS {
       }
 
       # Traza mínima para confirmar parámetros
-      Write-Host ("  - Aplicando referencia: Report='{0}'  DSName='{1}'  RsItem='{2}'" -f $reportItemPath, $ds.Name, $targetRef)
+      Write-Host ("  - Aplicando referencia: Report='{0}'  DataSourceName='{1}'  DataSourcePath='{2}'" -f $reportItemPath, $ds.Name, $targetRef)
 
       # Llamada 100% calificada al cmdlet correcto del módulo correcto (sin aliases, sin splatting)
-      Set-RsDataSourceReference @{
+      & $SetDsRef @{
         ReportServerUri = $ApiUrl
-        Path            = $reportItemPath        # /Apps/<Proyecto>/<NombreReporte>
-        DataSourceName  = $ds.Name               # nombre EXACTO del DS dentro del RDL
-        DataSourcePath  = $targetRef             # /Apps/Shared/Data Sources/<DS> o /Apps/<Proyecto>/<DS>
+        Path            = $reportItemPath
+        DataSourceName  = $ds.Name
+        DataSourcePath  = $targetRef
       } | Out-Null
 
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
