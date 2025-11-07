@@ -1,120 +1,244 @@
 param(
-  [Parameter(Mandatory=$true)] [string]$PortalUrl,      # ej: http://localhost/reports
-  [Parameter(Mandatory=$true)] [string]$ApiUrl,         # ej: http://localhost/reportserver
-  [Parameter(Mandatory=$true)] [string]$TargetFolder,   # ej: /Apps/Smoke
-  [string]$User, [string]$Pass                          # opcional: si deseas credenciales explícitas
+  [Parameter(Mandatory=$true)] [string]$PortalUrl,      # ej: http://localhost/Reports  (solo informativo)
+  [Parameter(Mandatory=$true)] [string]$ApiUrl,         # ej: http://localhost/ReportServer
+  [Parameter()] [string]$TargetBase = "/Apps",          # carpeta raíz en SSRS
+  [string]$User,
+  [string]$Pass
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# 1) Instalar/Importar RSTools (safe para correr en cada build)
-if (-not (Get-Module -ListAvailable -Name ReportingServicesTools)) {
-  Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-  Install-Module ReportingServicesTools -Scope CurrentUser -Force -AllowClobber
-}
-
-
-# 2) Credenciales (si se proveen)
+# --- Credenciales opcionales ---
 $cred = $null
 if ($User -and $Pass) {
   $sec = ConvertTo-SecureString $Pass -AsPlainText -Force
-  $cred = New-Object System.Management.Automation.PSCredential($User,$sec)
+  $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
 }
+
+# --- Helpers SSRS ---
 
 function Normalize-RsPath {
   param([Parameter(Mandatory=$true)][string]$Path)
-  # Reemplaza \ por /, quita espacios, fuerza raíz
   $p = $Path.Trim().Replace('\','/')
   if (-not $p.StartsWith('/')) { $p = '/' + $p }
-  # quita doble slash
   $p = $p -replace '/{2,}','/'
-  # quita trailing slash salvo raíz
   if ($p.Length -gt 1 -and $p.EndsWith('/')) { $p = $p.TrimEnd('/') }
   return $p
 }
 
-function Get-RsParentPath {
-  param([Parameter(Mandatory=$true)][string]$Path)
-  $p = Normalize-RsPath $Path
-  if ($p -eq '/') { return $null }                # raíz no tiene padre
-  $lastSlash = $p.LastIndexOf('/')
-  if ($lastSlash -le 0) { return '/' }            # p.ej. '/Apps' -> '/'
-  return $p.Substring(0, $lastSlash)
-}
-
-function Get-RsLeafName {
-  param([Parameter(Mandatory=$true)][string]$Path)
-  $p = Normalize-RsPath $Path
-  if ($p -eq '/') { return '/' }
-  $lastSlash = $p.LastIndexOf('/')
-  return $p.Substring($lastSlash + 1)
-}
-
-# 3) Helper: asegurar carpeta en SSRS
-function Test-RsFolderExists {
+function Ensure-RsPath {
   param(
     [Parameter(Mandatory=$true)][string]$ApiUrl,
-    [Parameter(Mandatory=$true)][string]$Path,
-    [Parameter()][pscredential]$Credential
+    [Parameter(Mandatory=$true)][string]$Path
   )
-  $p      = Normalize-RsPath $Path
-  $parent = Get-RsParentPath $p
-  $leaf   = Get-RsLeafName   $p
+  $p = Normalize-RsPath $Path
+  if ($p -eq '/') { return }
+  $segments = $p.TrimStart('/').Split('/')
+  $current = '/'
 
-  if (-not $parent) { return $true }  # raíz
+  foreach ($seg in $segments) {
+    $listArgs = @{ ReportServerUri = $ApiUrl; Path = $current; ErrorAction = 'SilentlyContinue' }
+    if ($script:cred) { $listArgs.Credential = $script:cred }
+    $kids = Get-RsFolderContent @listArgs
 
-  $items = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $parent -Credential $Credential -ErrorAction SilentlyContinue
-  return $items | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq $leaf }
-}
-
-function Ensure-Folder {
-  param(
-    [Parameter(Mandatory=$true)][string]$ApiUrl,
-    [Parameter(Mandatory=$true)][string]$Path,
-    [Parameter()][pscredential]$Credential
-  )
-
-  $p      = Normalize-RsPath $Path
-  if ($p -eq '/') { return }  # nada que crear
-
-  if (-not (Test-RsFolderExists -ApiUrl $ApiUrl -Path $p -Credential $Credential)) {
-    $parent = Get-RsParentPath $p
-    if (-not $parent) { $parent = '/' }
-    # Asegura que el padre exista (recursivo)
-    if ($parent -ne '/' -and -not (Test-RsFolderExists -ApiUrl $ApiUrl -Path $parent -Credential $Credential)) {
-      Ensure-Folder -ApiUrl $ApiUrl -Path $parent -Credential $Credential
+    if (-not ($kids | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq $seg })) {
+      $newArgs = @{ ReportServerUri = $ApiUrl; Path = $current; Name = $seg; ErrorAction = 'Stop' }
+      if ($script:cred) { $newArgs.Credential = $script:cred }
+      New-RsFolder @newArgs | Out-Null
+      Write-Host "Creada carpeta: $current/$seg"
     }
-    New-RsFolder -ReportServerUri $ApiUrl -Path $parent -Name (Get-RsLeafName $p) -Credential $Credential | Out-Null
-    Write-Host "Creada carpeta: $p"
-  } else {
-    Write-Host "OK carpeta: $p"
+
+    $current = ($current -eq '/') ? "/$seg" : "$current/$seg"
   }
 }
 
-# 4) Crear/validar carpeta destino
-$TargetFolder = Normalize-RsPath $TargetFolder
-Ensure-Folder -ApiUrl $ApiUrl -Path $TargetFolder -Credential $cred
+# --- Publicadores ---
 
-$img = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\Resources\logo.jpg"
-$rdl = Join-Path -Path $PSScriptRoot -ChildPath "..\reports\RDL\smoke\Smoke_detailed.rdl"
-
-
-# Reporte (RDL)
-$wrRdl = @{
-  ReportServerUri = $ApiUrl
-  Path           = $rdl          # ruta LOCAL del .rdl
-  RsFolder       = $TargetFolder # carpeta en SSRS (ej: /Apps/Smoke)
-  Name           = 'Smoke_detailed'
-  Overwrite      = $true
-  Credential     = $cred
+function Publish-Resources {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][string]$LocalFolder,
+    [Parameter(Mandatory=$true)][string]$RsFolder
+  )
+  if (-not (Test-Path $LocalFolder)) { return }
+  $files = Get-ChildItem -Path $LocalFolder -File -Recurse
+  foreach ($f in $files) {
+    $args = @{
+      ReportServerUri = $ApiUrl
+      Path           = $f.FullName
+      RsFolder       = (Normalize-RsPath $RsFolder)
+      Overwrite      = $true
+    }
+    if ($script:cred) { $args.Credential = $script:cred }
+    Write-RsCatalogItem @args | Out-Null
+    Write-Host "Publicado recurso: $($f.Name) en $RsFolder"
+  }
 }
-Write-RsCatalogItem @wrRdl | Out-Null
 
+function Publish-DataSources {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][string]$LocalFolder,
+    [Parameter(Mandatory=$true)][string]$RsFolder
+  )
+  if (-not (Test-Path $LocalFolder)) { return }
+  $dss = Get-ChildItem -Path $LocalFolder -File -Include *.rds,*.rsds -Recurse
+  foreach ($ds in $dss) {
+    $args = @{
+      ReportServerUri = $ApiUrl
+      Path           = $ds.FullName
+      RsFolder       = (Normalize-RsPath $RsFolder)
+      Overwrite      = $true
+    }
+    if ($script:cred) { $args.Credential = $script:cred }
+    Write-RsCatalogItem @args | Out-Null
+    Write-Host "Publicado DataSource: $($ds.Name) en $RsFolder"
+  }
+}
 
+function Publish-DataSets {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][string]$LocalFolder,
+    [Parameter(Mandatory=$true)][string]$RsFolder
+  )
+  if (-not (Test-Path $LocalFolder)) { return }
+  $sets = Get-ChildItem -Path $LocalFolder -File -Include *.rsd -Recurse
+  foreach ($s in $sets) {
+    $args = @{
+      ReportServerUri = $ApiUrl
+      Path           = $s.FullName
+      RsFolder       = (Normalize-RsPath $RsFolder)
+      Overwrite      = $true
+    }
+    if ($script:cred) { $args.Credential = $script:cred }
+    Write-RsCatalogItem @args | Out-Null
+    Write-Host "Publicado DataSet: $($s.Name) en $RsFolder"
+  }
+}
 
-# 7) (Opcional) Vincular DataSource compartido si tu RDL lo requiere
-# Set-RsDataSourceReference -ReportServerUri $ApiUrl -Path "$TargetFolder/hello_world" `
-#   -DataSourceName "DS_MAIN" -ReferencePath "/DataSources/DW" -Credential $cred
+# --- RDL: extracción y remapeo de DS ---
 
-Write-Host "Smoke test OK → revisa: $PortalUrl$TargetFolder"
+function Get-RdlDataSourceRefs {
+  param([Parameter(Mandatory=$true)][string]$RdlPath)
+
+  [xml]$x = Get-Content $RdlPath
+
+  # namespaces posibles
+  $namespaces = @(
+    @{ pfx='d'; uri='http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition' },
+    @{ pfx='d'; uri='http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition' }
+  )
+
+  $nodes = $null
+  foreach ($ns in $namespaces) {
+    $nm = New-Object System.Xml.XmlNamespaceManager($x.NameTable)
+    $nm.AddNamespace($ns.pfx, $ns.uri) | Out-Null
+    $nodes = $x.SelectNodes("//d:Report/d:DataSources/d:DataSource", $nm)
+    if ($nodes -and $nodes.Count -gt 0) { break }
+  }
+
+  $out = @()
+  if ($nodes) {
+    foreach ($n in $nodes) {
+      $name = $n.Name
+      # si existe DataSourceReference como string, tomarlo
+      $ref = $n.DataSourceReference
+      if ($ref) {
+        $out += [pscustomobject]@{ Name=$name; Reference=($ref.'#text') }
+      } else {
+        $out += [pscustomobject]@{ Name=$name; Reference=$null }  # embebido
+      }
+    }
+  }
+  return $out
+}
+
+function Publish-Reports-And-MapDS {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][string]$LocalReportsFolder,
+    [Parameter(Mandatory=$true)][string]$ProjectRsFolder,      # /Apps/Proyecto
+    [Parameter(Mandatory=$true)][string]$SharedDsFolder        # /Apps/Shared/Data Sources
+  )
+  if (-not (Test-Path $LocalReportsFolder)) { return }
+  $rdls = Get-ChildItem -Path $LocalReportsFolder -File -Include *.rdl -Recurse
+
+  foreach ($rdl in $rdls) {
+    # Publicar el RDL
+    $pubArgs = @{
+      ReportServerUri = $ApiUrl
+      Path           = $rdl.FullName
+      RsFolder       = (Normalize-RsPath $ProjectRsFolder)
+      Overwrite      = $true
+    }
+    if ($script:cred) { $pubArgs.Credential = $script:cred }
+    Write-RsCatalogItem @pubArgs | Out-Null
+    Write-Host "Publicado RDL: $($rdl.Name) en $ProjectRsFolder"
+
+    # Remapeo de DS
+    $dsList = Get-RdlDataSourceRefs -RdlPath $rdl.FullName
+    foreach ($ds in $dsList) {
+      if (-not $ds.Reference) {
+        Write-Host "  - DS '$($ds.Name)' embebido (sin remap)."
+        continue
+      }
+
+      $reportItemPath   = (Normalize-RsPath ("$ProjectRsFolder/" + [System.IO.Path]::GetFileNameWithoutExtension($rdl.Name)))
+      $candidateProject = (Normalize-RsPath ("$ProjectRsFolder/" + $ds.Reference))
+      $candidateShared  = (Normalize-RsPath ("$SharedDsFolder/" + $ds.Reference))
+
+      # ¿existe en proyecto?
+      $getArgs = @{ ReportServerUri = $ApiUrl; Path = $candidateProject; ErrorAction = 'SilentlyContinue' }
+      if ($script:cred) { $getArgs.Credential = $script:cred }
+      $existsProject = Get-RsCatalogItem @getArgs
+
+      $targetRef = $existsProject ? $candidateProject : $candidateShared
+
+      $mapArgs = @{
+        ReportServerUri = $ApiUrl
+        Path           = $reportItemPath
+        DataSourceName = $ds.Name
+        RsItem         = $targetRef
+      }
+      if ($script:cred) { $mapArgs.Credential = $script:cred }
+      Set-RsDataSourceReference @mapArgs | Out-Null
+
+      Write-Host "  - DS '$($ds.Name)' → $targetRef"
+    }
+  }
+}
+
+# --- ORQUESTADOR ---
+
+$TargetBase = Normalize-RsPath $TargetBase
+$RepoRoot   = Join-Path $PSScriptRoot "..\reports"
+
+# 0) estructura base
+Ensure-RsPath -ApiUrl $ApiUrl -Path $TargetBase
+Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Shared/Data Sources"
+Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Shared/Data Sets"
+Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Shared/Resources"
+
+# 1) publicar shared
+Publish-DataSources -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSources") -RsFolder "$TargetBase/Shared/Data Sources"
+Publish-DataSets   -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSets")   -RsFolder "$TargetBase/Shared/Data Sets"
+Publish-Resources  -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\Resources")  -RsFolder "$TargetBase/Shared/Resources"
+
+# 2) proyectos (todas las carpetas excepto Shared)
+$projects = Get-ChildItem -Path $RepoRoot -Directory | Where-Object { $_.Name -ne 'Shared' }
+foreach ($proj in $projects) {
+  $projName     = $proj.Name
+  $projRsFolder = "$TargetBase/$projName"
+  Ensure-RsPath -ApiUrl $ApiUrl -Path $projRsFolder
+
+  Publish-DataSources -ApiUrl $ApiUrl -LocalFolder (Join-Path $proj.FullName "DataSources") -RsFolder $projRsFolder
+  Publish-Resources  -ApiUrl $ApiUrl -LocalFolder (Join-Path $proj.FullName "Resources")   -RsFolder "$projRsFolder/Resources"
+
+  Publish-Reports-And-MapDS `
+    -ApiUrl $ApiUrl `
+    -LocalReportsFolder (Join-Path $proj.FullName "Reports") `
+    -ProjectRsFolder $projRsFolder `
+    -SharedDsFolder "$TargetBase/Shared/Data Sources"
+}

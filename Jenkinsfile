@@ -92,11 +92,11 @@ stage('Deploy SSRS') {
     Write-Host "OK carpeta existe: /Apps/Smoke"
     }
 
-    # (ahora sí) correr tu script apuntando a /Apps/Smoke
-    & $script `
-    -PortalUrl  "http://desktop-p7l4ng4/Reports" `
-    -ApiUrl     $api `
-    -TargetFolder "/Apps/Smoke"
+    # Llamada al archivo .ps1 para el deployment
+    & "$env:WORKSPACE\scripts\deploy-ssrs.ps1" `
+  -PortalUrl "http://localhost/Reports" `
+  -ApiUrl "http://localhost/ReportServer" `
+  -TargetBase "/Apps"
     '''
   }
 }
