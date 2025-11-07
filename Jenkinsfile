@@ -1,7 +1,25 @@
 pipeline {
-  agent { label 'SSRS_PC_P7L4NG4' }
+    agent { label 'SSRS_PC_P7L4NG4' }
+    options { skipDefaultCheckout(true) }
 
   stages {
+
+    stage('Prepare Workspace') {
+      steps { deleteDir() }
+    }
+
+    stage('Checkout - Automation Scripts') {
+      steps {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: '*/main']],
+          userRemoteConfigs: [[
+            url: 'https://github.com/leo-morales182/Jenkins_SQL_Automation.git',
+            credentialsId: 'Github_leo_morales_credentials'
+          ]]
+        ])
+      }
+    }
 
     stage('Checkout - SSRS Reports') {
         steps {
