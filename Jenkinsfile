@@ -18,91 +18,66 @@ pipeline {
         }
         }
 
-stage('Deploy SSRS') {
-  steps {
-    powershell '''
-      $ErrorActionPreference = "Stop"
-      $ProgressPreference = "SilentlyContinue"
-      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    stage('Deploy SSRS') {
+        steps {
+            powershell '''
+            $ErrorActionPreference = "Stop"
+            $ProgressPreference = "SilentlyContinue"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-      Write-Host "WORKSPACE: $env:WORKSPACE"
+            Write-Host "WORKSPACE: $env:WORKSPACE"
 
-      # Rutas
-      $script   = Join-Path $env:WORKSPACE "scripts\\deploy-smoke-ssrs.ps1"
-      $origen   = Join-Path $env:WORKSPACE "ssrs\\reports\\RDL\\smoke\\Smoke_detailed.rdl"
-      $destino  = Join-Path $env:WORKSPACE "reports\\RDL\\smoke\\Smoke_detailed.rdl"
+            # Rutas
+            $script   = Join-Path $env:WORKSPACE "scripts\\deploy-ssrs.ps1"
 
-      if (-not (Test-Path $script))  { throw "No encuentro el script: $script" }
-      if (-not (Test-Path $origen))  { throw "No encuentro el RDL de origen: $origen" }
+            # --- Bootstrap PSGallery/NuGet sin prompts ---
+            if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+                Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+            }
+            try {
+                $repo = Get-PSRepository -Name PSGallery -ErrorAction Stop
+                if ($repo.InstallationPolicy -ne "Trusted") {
+                Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+                }
+            } catch {
+                Register-PSRepository -Default -ErrorAction SilentlyContinue
+                Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            }
 
-      New-Item -ItemType Directory -Force -Path (Split-Path $destino) | Out-Null
-      Copy-Item $origen $destino -Force
-      Write-Host "Copiado RDL a: $destino"
+            # --- Descarga e importación del módulo por RUTA ---
+            $modBase = "C:\\jenkins\\psmodules"
+            $modName = "ReportingServicesTools"
+            if (-not (Test-Path $modBase)) { New-Item -Type Directory -Path $modBase | Out-Null }
+            if (-not (Get-ChildItem -Directory (Join-Path $modBase $modName) -ErrorAction SilentlyContinue)) {
+                Save-Module -Name $modName -Path $modBase -Force
+            }
+            $modPath = Get-ChildItem -Directory (Join-Path $modBase $modName) | Sort-Object Name -Descending | Select-Object -First 1
+            if (-not $modPath) { throw "No pude descargar $modName a $modBase" }
+            $psd1 = Get-ChildItem -Path $modPath.FullName -Filter *.psd1 -Recurse | Select-Object -First 1 -Expand FullName
+            if (-not (Test-Path $psd1)) { throw "No encontré el archivo .psd1 de $modName bajo $($modPath.FullName)" }
 
-      # --- Bootstrap PSGallery/NuGet sin prompts ---
-      if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
-        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-      }
-      try {
-        $repo = Get-PSRepository -Name PSGallery -ErrorAction Stop
-        if ($repo.InstallationPolicy -ne "Trusted") {
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            Import-Module $psd1 -Force -DisableNameChecking -ErrorAction Stop
+            $cmd = Get-Command New-RsFolder -ErrorAction Stop
+            Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
+
+            # Asegurar carpetas base mínimas (si quieres mantener este tramo aquí)
+            $api = "http://desktop-p7l4ng4/ReportServer"
+            if (-not (Get-RsFolderContent -ReportServerUri $api -Path '/' -ErrorAction SilentlyContinue | ? { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Apps' })) {
+                New-RsFolder -ReportServerUri $api -Path '/' -Name 'Apps' -ErrorAction Stop | Out-Null
+                Write-Host "Creada carpeta: /Apps"
+            } else { Write-Host "OK carpeta existe: /Apps" }
+
+            if (-not (Get-RsFolderContent -ReportServerUri $api -Path '/Apps' -ErrorAction SilentlyContinue | ? { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Smoke' })) {
+                New-RsFolder -ReportServerUri $api -Path '/Apps' -Name 'Smoke' -ErrorAction Stop | Out-Null
+                Write-Host "Creada carpeta: /Apps/Smoke"
+            } else { Write-Host "OK carpeta existe: /Apps/Smoke" }
+
+            # === Invocar tu script con parámetros en una sola línea ===
+            & "$env:WORKSPACE\\scripts\\deploy-ssrs.ps1" -PortalUrl "http://localhost/Reports" -ApiUrl "http://localhost/ReportServer" -TargetBase "/Apps"
+            '''
         }
-      } catch {
-        Register-PSRepository -Default -ErrorAction SilentlyContinue
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-      }
-
-      # --- Descarga e importación del módulo por RUTA (a prueba de balas) ---
-      $modBase = "C:\\jenkins\\psmodules"
-      $modName = "ReportingServicesTools"
-      if (-not (Test-Path $modBase)) { New-Item -Type Directory -Path $modBase | Out-Null }
-      if (-not (Get-ChildItem -Directory (Join-Path $modBase $modName) -ErrorAction SilentlyContinue)) {
-        Save-Module -Name $modName -Path $modBase -Force
-      }
-      $modPath = Get-ChildItem -Directory (Join-Path $modBase $modName) | Sort-Object Name -Descending | Select-Object -First 1
-      if (-not $modPath) { throw "No pude descargar $modName a $modBase" }
-      $psd1 = Get-ChildItem -Path $modPath.FullName -Filter *.psd1 -Recurse | Select-Object -First 1 -Expand FullName
-      if (-not (Test-Path $psd1)) { throw "No encontré el archivo .psd1 de $modName bajo $($modPath.FullName)" }
-
-      Import-Module $psd1 -Force -DisableNameChecking -ErrorAction Stop
-      # valida con un cmdlet estable del módulo
-      $cmd = Get-Command New-RsFolder -ErrorAction Stop
-      Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
-
-    
-    # === Asegurar carpetas en SSRS paso a paso ===
-    $api = "http://desktop-p7l4ng4/ReportServer"   # ajusta si tu API es otra
-
-    # 1) asegurar /Apps
-    $rootChildren = Get-RsFolderContent -ReportServerUri $api -Path '/' -ErrorAction SilentlyContinue
-    if (-not ($rootChildren | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Apps' })) {
-    New-RsFolder -ReportServerUri $api -Path '/' -Name 'Apps' -ErrorAction Stop | Out-Null
-    Write-Host "Creada carpeta: /Apps"
-    } else {
-    Write-Host "OK carpeta existe: /Apps"
     }
 
-    # 2) asegurar /Apps/Smoke
-    $appsChildren = Get-RsFolderContent -ReportServerUri $api -Path '/Apps' -ErrorAction SilentlyContinue
-    if (-not ($appsChildren | Where-Object { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Smoke' })) {
-    New-RsFolder -ReportServerUri $api -Path '/Apps' -Name 'Smoke' -ErrorAction Stop | Out-Null
-    Write-Host "Creada carpeta: /Apps/Smoke"
-    } else {
-    Write-Host "OK carpeta existe: /Apps/Smoke"
+
     }
-
-    # Llamada al archivo .ps1 para el deployment
-    & "$env:WORKSPACE\scripts\deploy-ssrs.ps1"
-  -PortalUrl "http://localhost/Reports"
-  -ApiUrl "http://localhost/ReportServer"
-  -TargetBase "/Apps"
-    '''
-  }
-}
-
-
-
-
-        }
 }
