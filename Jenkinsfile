@@ -84,6 +84,9 @@ pipeline {
             $cmd = Get-Command New-RsFolder -ErrorAction Stop
             Write-Host "Módulo cargado OK: $($cmd.Source)  en  $($cmd.Module.ModuleBase)"
 
+            Remove-Item alias:Set-RsDataSourceReference -ErrorAction SilentlyContinue
+            Remove-Item alias:Set-RsDataSource        -ErrorAction SilentlyContinue
+
             # Asegurar carpetas base mínimas (si quieres mantener este tramo aquí)
             $api = "http://desktop-p7l4ng4/ReportServer"
             if (-not (Get-RsFolderContent -ReportServerUri $api -Path '/' -ErrorAction SilentlyContinue | ? { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Apps' })) {

@@ -187,6 +187,9 @@ function Publish-Reports-And-MapDS {
   if (-not (Test-Path $LocalReportsFolder)) { return }
   $rdls = Get-ChildItem -Path $LocalReportsFolder -File -Include *.rdl -Recurse
 
+  # Forzar el cmdlet del módulo correcto para evitar alias/confusiones
+  $SetDsRef = Get-Command 'ReportingServicesTools\Set-RsDataSourceReference' -ErrorAction Stop
+
   foreach ($rdl in $rdls) {
     # Publicar el RDL
     $pubArgs = @{
@@ -250,13 +253,23 @@ function Publish-Reports-And-MapDS {
           continue
         }
       }
-
+      
       # Aplica la referencia al reporte
-      Set-RsDataSourceReference @{
+      # Guardas para evitar binding raro
+      if ([string]::IsNullOrWhiteSpace($ds.Name)) {
+        Write-Warning "  - DataSource con nombre vacío en $($rdl.Name); se omite."
+        continue
+      }
+      if ([string]::IsNullOrWhiteSpace($targetRef)) {
+        Write-Warning "  - targetRef vacío para '$($ds.Name)'; se omite."
+        continue
+      }
+
+      & $SetDsRef @{
         ReportServerUri = $ApiUrl
-        Path           = $reportItemPath
+        Path           = $reportItemPath      # /Apps/Proyecto/NombreReporte (sin .rdl)
         DataSourceName = $ds.Name
-        RsItem         = $targetRef
+        RsItem         = $targetRef           # p.ej. /Apps/Shared/Data Sources/products_SDS
       } | Out-Null
 
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
