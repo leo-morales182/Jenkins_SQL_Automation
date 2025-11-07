@@ -275,16 +275,22 @@ function Publish-Reports-And-MapDS {
         continue
       }
 
+      # Aplica la referencia al reporte
+      # Asegúrate de que $targetRef sea un path absoluto (empieza con '/')
+      if (-not $targetRef.StartsWith('/')) {
+        $targetRef = '/' + $targetRef.TrimStart('/')
+      }
+
       # Traza mínima para confirmar parámetros
       Write-Host ("  - Aplicando referencia: Report='{0}'  DSName='{1}'  RsItem='{2}'" -f $reportItemPath, $ds.Name, $targetRef)
 
       # Llamada 100% calificada al cmdlet correcto del módulo correcto (sin aliases, sin splatting)
-      ReportingServicesTools\Set-RsDataSourceReference `
-        -ReportServerUri $ApiUrl `
-        -Path            $reportItemPath `
-        -DataSourceName  $ds.Name `
-        -RsItem          $targetRef `
-        -ErrorAction     Stop | Out-Null
+      Set-RsDataSourceReference @{
+        ReportServerUri = $ApiUrl
+        Path            = $reportItemPath        # /Apps/<Proyecto>/<NombreReporte>
+        DataSourceName  = $ds.Name               # nombre EXACTO del DS dentro del RDL
+        DataSourcePath  = $targetRef             # /Apps/Shared/Data Sources/<DS> o /Apps/<Proyecto>/<DS>
+      } | Out-Null
 
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
     }
