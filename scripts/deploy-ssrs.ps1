@@ -190,17 +190,15 @@ function Publish-Reports-And-MapDS {
   # Forzar el cmdlet del módulo correcto para evitar alias/confusiones
   $SetDsRef = Get-Command 'ReportingServicesTools\Set-RsDataSourceReference' -ErrorAction Stop
 
-  # --- Diagnóstico y fijado del cmdlet correcto ---
-  $cmds = Get-Command Set-RsDataSourceReference -All
+  # (opcional) diagnóstico ligero
+  $cmds = Get-Command Set-RsDataSourceReference -All | Where-Object { $_.ModuleName -eq 'ReportingServicesTools' }
   Write-Host "Set-RsDataSourceReference encontrados:"
   $cmds | ForEach-Object { Write-Host ("  - {0} :: {1} ({2})" -f $_.Name, $_.ModuleName, $_.CommandType) }
 
-  $SetDsRef = Get-Command -Name Set-RsDataSourceReference -Module ReportingServicesTools -CommandType Cmdlet -ErrorAction Stop
-  Write-Host ("Usando: {0} :: {1}" -f $SetDsRef.Name, $SetDsRef.ModuleName)
-
-  # Si aún existiera algún alias, bórralo aquí también (doble seguro)
+  # limpia aliases por si acaso
   Remove-Item alias:Set-RsDataSourceReference -ErrorAction SilentlyContinue
-  Remove-Item alias:Set-RsDataSource         -ErrorAction SilentlyContinue
+  Remove-Item alias:Set-RsDataSource          -ErrorAction SilentlyContinue
+
 
 
   foreach ($rdl in $rdls) {
