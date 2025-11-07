@@ -284,13 +284,22 @@ function Publish-Reports-And-MapDS {
       # Traza mínima para confirmar parámetros
       Write-Host ("  - Aplicando referencia: Report='{0}'  DataSourceName='{1}'  DataSourcePath='{2}'" -f $reportItemPath, $ds.Name, $targetRef)
 
-      # Llamada 100% calificada al cmdlet correcto del módulo correcto (sin aliases, sin splatting)
-      & $SetDsRef @{
+      # Validación extra de parámetros obligatorios
+      if ([string]::IsNullOrWhiteSpace($ds.Name) -or [string]::IsNullOrWhiteSpace($targetRef)) {
+        Write-Warning "  - DataSourceName o DataSourcePath vacío para $($rdl.Name); se omite."
+        continue
+      }
+
+      # Splatting correcto para el cmdlet
+      $setDsRefArgs = @{
         ReportServerUri = $ApiUrl
         Path            = $reportItemPath
         DataSourceName  = $ds.Name
         DataSourcePath  = $targetRef
-      } | Out-Null
+      }
+      if ($script:cred) { $setDsRefArgs.Credential = $script:cred }
+
+      & $SetDsRef @setDsRefArgs | Out-Null
 
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
     }
