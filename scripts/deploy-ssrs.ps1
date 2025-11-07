@@ -203,6 +203,8 @@ function Publish-Reports-And-MapDS {
     Write-Host "  - DS detectados en $($rdl.Name): " ($dsList | ForEach-Object { "$($_.Name) -> $($_.Reference)" } | Out-String)
 
     foreach ($ds in $dsList) {
+      Write-Host "Salida 1"
+      
       if (-not $ds.Reference) {
         Write-Host "  - DataSource '$($ds.Name)' es embebido. (se deja embebido)"
         continue
@@ -212,8 +214,10 @@ function Publish-Reports-And-MapDS {
 
       # Si el RDL ya trae path absoluto (/Apps/...): úsalo directo
       if ($ds.Reference.StartsWith('/')) {
+        Write-Host "Path absoluto"
         $targetRef = $ds.Reference
       } else {
+        Write-Host "NO path absoluto"
         # Solo nombre lógico -> intenta proyecto y luego Shared
         $candidateProject = "$ProjectRsFolder/$($ds.Reference)"
         $candidateShared  = "$SharedDsFolder/$($ds.Reference)"
