@@ -1,7 +1,7 @@
 param(
-  [Parameter(Mandatory=$true)] [string]$PortalUrl,      # ej: http://localhost/Reports  (solo informativo)
+  [Parameter(Mandatory=$true)] [string]$PortalUrl,      # ej: http://localhost/Reports (solo informativo)
   [Parameter(Mandatory=$true)] [string]$ApiUrl,         # ej: http://localhost/ReportServer
-  [Parameter()] [string]$TargetBase = "/Apps",          # carpeta raíz en SSRS
+  [Parameter()] [string]$TargetBase = "/",              # ahora raíz del servidor SSRS
   [string]$RepoRoot,
   [string]$User,
   [string]$Pass
@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
 
-# --- Credenciales opcionales ---
+# --- Credenciales ---
 $cred = $null
 if ($User -and $Pass) {
   $sec  = ConvertTo-SecureString $Pass -AsPlainText -Force
@@ -19,17 +19,20 @@ if ($User -and $Pass) {
 }
 $script:cred = $cred
 
+# Resolver RepoRoot a la carpeta 'reports'
 if (-not $RepoRoot -or -not (Test-Path $RepoRoot)) {
   $candidate1 = Join-Path $PSScriptRoot "..\reports"
   $candidate2 = Join-Path $env:WORKSPACE "ssrs\reports"
   if     (Test-Path $candidate1) { $RepoRoot = $candidate1 }
   elseif (Test-Path $candidate2) { $RepoRoot = $candidate2 }
-  else  { throw "No encuentro carpeta 'reports' en: `n - $candidate1 `n - $candidate2" }
+  else  { throw "Not 'reports' folder in: `n - $candidate1 `n - $candidate2" }
 }
 Write-Host "RepoRoot: $RepoRoot"
 
-# --- Helpers SSRS ---
+# === NUEVO: carpeta DS compartidos en raíz ===
+$SharedDsFolder = "/Data Sources"
 
+# --- Helpers SSRS ---
 function Normalize-RsPath {
   param([Parameter(Mandatory=$true)][string]$Path)
   $p = $Path.Trim().Replace('\','/')
@@ -58,19 +61,14 @@ function Ensure-RsPath {
       $newArgs = @{ ReportServerUri = $ApiUrl; Path = $current; Name = $seg; ErrorAction = 'Stop' }
       if ($script:cred) { $newArgs.Credential = $script:cred }
       New-RsFolder @newArgs | Out-Null
-      Write-Host "Creada carpeta: $current/$seg"
+      Write-Host "Folder created: $current/$seg"
     }
 
-    if ($current -eq '/') {
-      $current = "/$seg"
-    } else {
-      $current = "$current/$seg"
-    }
+    if ($current -eq '/') { $current = "/$seg" } else { $current = "$current/$seg" }
   }
 }
 
-# --- Publicadores ---
-
+# --- Publicadores (tus funciones originales, sin cambios de firma) ---
 function Publish-Resources {
   param(
     [Parameter(Mandatory=$true)][string]$ApiUrl,
@@ -88,7 +86,7 @@ function Publish-Resources {
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
-    Write-Host "Publicado recurso: $($f.Name) en $RsFolder"
+    Write-Host "Resource: $($f.Name) published in $RsFolder"
   }
 }
 
@@ -109,7 +107,7 @@ function Publish-DataSources {
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
-    Write-Host "Publicado DataSource: $($ds.Name) en $RsFolder"
+    Write-Host "DataSource: $($ds.Name) published in $RsFolder"
   }
 }
 
@@ -130,12 +128,11 @@ function Publish-DataSets {
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
-    Write-Host "Publicado DataSet: $($s.Name) en $RsFolder"
+    Write-Host "DataSet: $($s.Name) published in $RsFolder"
   }
 }
 
-# --- RDL: extracción y remapeo de DS ---
-
+# --- RDL: extracción y remapeo de DS (tu función original) ---
 function Get-RdlDataSourceRefs {
   param([Parameter(Mandatory=$true)][string]$RdlPath)
 
@@ -154,143 +151,74 @@ function Get-RdlDataSourceRefs {
     if ($nodes -and $nodes.Count -gt 0) {
       $out = @()
       foreach ($n in $nodes) {
-        # Nombre puede ser atributo @Name
         $name = $null
-        if ($n.Attributes -and $n.Attributes["Name"]) {
-          $name = $n.Attributes["Name"].Value
-        } else {
+        if ($n.Attributes -and $n.Attributes["Name"]) { $name = $n.Attributes["Name"].Value }
+        else {
           $attrNode = $n.SelectSingleNode("@Name")
           if ($attrNode) { $name = $attrNode.Value }
         }
-
-        # Referencia a shared DS (DataSourceReference)
         $ref = $null
         $refNode = $n.SelectSingleNode("d:DataSourceReference", $nsm)
         if ($refNode) { $ref = $refNode.InnerText }
-
         $out += [pscustomobject]@{ Name = $name; Reference = $ref }
       }
       return $out
     }
   }
 
-  throw "No pude leer DataSources del RDL (namespace no reconocido o estructura inesperada)."
+  throw "DataSources can't be read from the RDL (namespace no reconocido o estructura inesperada)."
 }
 
 function Publish-Reports-And-MapDS {
   param(
     [Parameter(Mandatory=$true)][string]$ApiUrl,
     [Parameter(Mandatory=$true)][string]$LocalReportsFolder,
-    [Parameter(Mandatory=$true)][string]$ProjectRsFolder,      # /Apps/Proyecto
-    [Parameter(Mandatory=$true)][string]$SharedDsFolder        # /Apps/Shared/Data Sources
+    [Parameter(Mandatory=$true)][string]$ProjectRsFolder,      # ahora: /<Proyecto>
+    [Parameter(Mandatory=$true)][string]$SharedDsFolder        # ahora: /Data Sources
   )
   if (-not (Test-Path $LocalReportsFolder)) { return }
   $rdls = Get-ChildItem -Path $LocalReportsFolder -File -Include *.rdl -Recurse
 
-  # Forzar el cmdlet del módulo correcto para evitar alias/confusiones
   $SetDsRef = Get-Command 'ReportingServicesTools\Set-RsDataSourceReference' -ErrorAction Stop
-
-  # (opcional) diagnóstico ligero
-  $cmds = Get-Command Set-RsDataSourceReference -All | Where-Object { $_.ModuleName -eq 'ReportingServicesTools' }
-  Write-Host "Set-RsDataSourceReference encontrados:"
-  $cmds | ForEach-Object { Write-Host ("  - {0} :: {1} ({2})" -f $_.Name, $_.ModuleName, $_.CommandType) }
-
-  # limpia aliases por si acaso
   Remove-Item alias:Set-RsDataSourceReference -ErrorAction SilentlyContinue
   Remove-Item alias:Set-RsDataSource          -ErrorAction SilentlyContinue
 
-
-
   foreach ($rdl in $rdls) {
-    # Publicar el RDL
+    # Publicar el RDL en /<Proyecto>/Reports
     $pubArgs = @{
       ReportServerUri = $ApiUrl
       Path           = $rdl.FullName
-      RsFolder       = (Normalize-RsPath $ProjectRsFolder)
+      RsFolder       = (Normalize-RsPath "$ProjectRsFolder/Reports")
       Overwrite      = $true
     }
     if ($script:cred) { $pubArgs.Credential = $script:cred }
     Write-RsCatalogItem @pubArgs | Out-Null
-    Write-Host "Publicado RDL: $($rdl.Name) en $ProjectRsFolder"
-    # 2) Re-mapear DS por nombre o path
+    Write-Host "RDL: $($rdl.Name) published in $($pubArgs.RsFolder)"
+
+    # Re-mapear DS a /Data Sources/<Name>
     $dsList = Get-RdlDataSourceRefs -RdlPath $rdl.FullName
-    Write-Host "  - DS detectados en $($rdl.Name): " ($dsList | ForEach-Object { "$($_.Name) -> $($_.Reference)" } | Out-String)
+    $reportItemPath = "$($pubArgs.RsFolder)/" + [System.IO.Path]::GetFileNameWithoutExtension($rdl.Name)
 
     foreach ($ds in $dsList) {
-      
       if (-not $ds.Reference) {
-        Write-Host "  - DataSource '$($ds.Name)' es embebido. (se deja embebido)"
+        Write-Host "  - DataSource '$($ds.Name)' es embebido."
         continue
       }
 
-      $reportItemPath = "$ProjectRsFolder/" + [System.IO.Path]::GetFileNameWithoutExtension($rdl.Name)
-
-      # Si el RDL ya trae path absoluto (/Apps/...): úsalo directo
+      # Si reference trae path absoluto, lo respetamos; si no, resolvemos a /Data Sources/<ref>
       if ($ds.Reference.StartsWith('/')) {
-        Write-Host "Path absoluto"
         $targetRef = $ds.Reference
       } else {
-        # Solo nombre lógico -> intenta proyecto y luego Shared
-        $candidateProject = "$ProjectRsFolder/$($ds.Reference)"
-        $candidateShared  = "$SharedDsFolder/$($ds.Reference)"
-        
-        # Búsqueda tolerantemente (case-insensitive) preguntando al server
-        # --- Proyecto ---
-        $projItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $ProjectRsFolder -ErrorAction SilentlyContinue
-        $matchProj = $projItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
-        $existsProject   = $false
-        $candidateProject = "$ProjectRsFolder/$($ds.Reference)"
-        if ($matchProj) {
-          # usa el nombre real (respeta mayúsculas/minúsculas tal como está en el server)
-          $candidateProject = "$ProjectRsFolder/$($matchProj.Name)"
-          $existsProject = $true
-        }
-
-        # --- Shared ---
-        $sharedItems = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $SharedDsFolder -ErrorAction SilentlyContinue
-        $matchShared = $sharedItems | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -ieq $ds.Reference }
-        $existsShared  = $false
-        $candidateShared = "$SharedDsFolder/$($ds.Reference)"
-        if ($matchShared) {
-          $candidateShared = "$SharedDsFolder/$($matchShared.Name)"
-          $existsShared = $true
-        }
-
-        # Escoge el targetRef
-        if ($existsProject)      { $targetRef = $candidateProject }
-        elseif ($existsShared)   { $targetRef = $candidateShared }
-        else {
-          Write-Warning "  - No encontré DS publicado para '$($ds.Name)' (ref='$($ds.Reference)') en '$ProjectRsFolder' ni en '$SharedDsFolder'."
-          continue
-        }
-      }
-      
-      # Guardas
-      if ([string]::IsNullOrWhiteSpace($ds.Name)) {
-        Write-Warning "  - DataSource con nombre vacío en $($rdl.Name); se omite."
-        continue
-      }
-      if ([string]::IsNullOrWhiteSpace($targetRef)) {
-        Write-Warning "  - targetRef vacío para '$($ds.Name)'; se omite."
-        continue
+        $targetRef = "$SharedDsFolder/$($ds.Reference)"
       }
 
-      # Aplica la referencia al reporte
-      # Asegúrate de que $targetRef sea un path absoluto (empieza con '/')
-      if (-not $targetRef.StartsWith('/')) {
-        $targetRef = '/' + $targetRef.TrimStart('/')
-      }
-
-      # Traza mínima para confirmar parámetros
-      Write-Host ("  - Aplicando referencia: Report='{0}'  DataSourceName='{1}'  DataSourcePath='{2}'" -f $reportItemPath, $ds.Name, $targetRef)
-
-      # Validación extra de parámetros obligatorios
+      # Confirmar y aplicar
       if ([string]::IsNullOrWhiteSpace($ds.Name) -or [string]::IsNullOrWhiteSpace($targetRef)) {
-        Write-Warning "  - DataSourceName o DataSourcePath vacío para $($rdl.Name); se omite."
+        Write-Warning "  - Parámetros inválidos para '$($rdl.Name)'; se omite."
         continue
       }
+      if (-not $targetRef.StartsWith('/')) { $targetRef = '/' + $targetRef.TrimStart('/') }
 
-      # Splatting correcto para el cmdlet
       $setDsRefArgs = @{
         ReportServerUri = $ApiUrl
         Path            = $reportItemPath
@@ -300,11 +228,76 @@ function Publish-Reports-And-MapDS {
       if ($script:cred) { $setDsRefArgs.Credential = $script:cred }
 
       & $SetDsRef @setDsRefArgs | Out-Null
-
       Write-Host "  - DS '$($ds.Name)' → $targetRef"
     }
+  }
+}
 
+# === NUEVO: recopilar y publicar RDS únicos a /Data Sources ===
+function Publish-SharedRdsFromProjects {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][System.IO.DirectoryInfo[]]$ProjectDirs,
+    [Parameter(Mandatory=$true)][string]$SharedDsFolder
+  )
 
+  Ensure-RsPath -ApiUrl $ApiUrl -Path $SharedDsFolder
+
+  # Tomar .rds en la RAÍZ de cada proyecto (no en Reports/)
+  $allRds = foreach ($proj in $ProjectDirs) {
+    Get-ChildItem -Path $proj.FullName -File -Filter *.rds
+  }
+
+  # Dedupe por nombre (sin extensión)
+  $byName = @{}
+  $dups = @()
+  foreach ($rds in $allRds) {
+    $name = [IO.Path]::GetFileNameWithoutExtension($rds.Name)
+    if (-not $byName.ContainsKey($name)) { $byName[$name] = $rds.FullName }
+    else { $dups += [pscustomobject]@{ Name=$name; First=$byName[$name]; Duplicate=$rds.FullName } }
+  }
+  if ($dups.Count -gt 0) {
+    Write-Warning "RDS duplicados por nombre; se usará el primero encontrado:"
+    $dups | ForEach-Object { Write-Warning (" - {0}: {1} (dup: {2})" -f $_.Name,$_.First,$_.Duplicate) }
+  }
+
+  # Publicar cada DS una sola vez en /Data Sources
+  foreach ($name in $byName.Keys) {
+    $src = $byName[$name]
+    $args = @{
+      ReportServerUri = $ApiUrl
+      Path           = $src
+      RsFolder       = (Normalize-RsPath $SharedDsFolder)
+      Overwrite      = $true
+    }
+    if ($script:cred) { $args.Credential = $script:cred }
+    Write-RsCatalogItem @args | Out-Null
+    Write-Host "Shared DS: $name (from $src) -> $SharedDsFolder"
+  }
+}
+
+# === NUEVO: publicar recursos del proyecto desde su RAÍZ (excluye .rds y la carpeta Reports) ===
+function Publish-ProjectResourcesFromRoot {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiUrl,
+    [Parameter(Mandatory=$true)][System.IO.DirectoryInfo]$ProjectDir
+  )
+  $target = "/$($ProjectDir.Name)/Resources"
+  Ensure-RsPath -ApiUrl $ApiUrl -Path "/$($ProjectDir.Name)"
+  Ensure-RsPath -ApiUrl $ApiUrl -Path $target
+
+  # Sólo archivos de la raíz del proyecto, excepto .rds y .rdl
+  $files = Get-ChildItem -Path $ProjectDir.FullName -File | Where-Object { $_.Extension -notin '.rds','.rdl' }
+  foreach ($f in $files) {
+    $args = @{
+      ReportServerUri = $ApiUrl
+      Path           = $f.FullName
+      RsFolder       = (Normalize-RsPath $target)
+      Overwrite      = $true
+    }
+    if ($script:cred) { $args.Credential = $script:cred }
+    Write-RsCatalogItem @args | Out-Null
+    Write-Host "Resource: $($f.Name) -> $target"
   }
 }
 
@@ -312,34 +305,37 @@ function Publish-Reports-And-MapDS {
 
 $TargetBase = Normalize-RsPath $TargetBase
 
-# 0) estructura base
-Ensure-RsPath -ApiUrl $ApiUrl -Path $TargetBase
-Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Shared/Data Sources"
-Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Shared/Data Sets"
-Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Shared/Resources"
+# 0) Estructura base en raíz
+Ensure-RsPath -ApiUrl $ApiUrl -Path $TargetBase          # "/"
+Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Data Sources"  # "/Data Sources"
 
-# 1) publicar shared
-Publish-DataSources -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSources") -RsFolder "$TargetBase/Shared/Data Sources"
-Publish-DataSets   -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSets")   -RsFolder "$TargetBase/Shared/Data Sets"
-Publish-Resources  -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\Resources")  -RsFolder "$TargetBase/Shared/Resources"
-
-# 2) proyectos (todas las carpetas excepto Shared)
+# 1) Proyectos: subcarpetas de RepoRoot (ya no existe 'Shared' en repo)
 $projects = Get-ChildItem -Path $RepoRoot -Directory | Where-Object { $_.Name -ne 'Shared' }
+
+# 2) Publicar TODOS los RDS únicos de los proyectos en /Data Sources (raíz)
+Publish-SharedRdsFromProjects -ApiUrl $ApiUrl -ProjectDirs $projects -SharedDsFolder "$TargetBase/Data Sources"
+
+# 3) (Opcional) Si aún manejas Shared DataSets/Resources globales en el repo, puedes comentar/ajustar estas líneas:
+# Publish-DataSets   -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSets")   -RsFolder "$TargetBase/Data Sets"
+# Publish-Resources  -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\Resources")  -RsFolder "$TargetBase/Resources"
+
+# 4) Publicar cada proyecto en raíz
 foreach ($proj in $projects) {
   $projName     = $proj.Name
-  $projRsFolder = "$TargetBase/$projName"
+  $projRsFolder = "$TargetBase/$projName"       # "/<Proyecto>"
   Ensure-RsPath -ApiUrl $ApiUrl -Path $projRsFolder
 
-  Publish-DataSources -ApiUrl $ApiUrl -LocalFolder (Join-Path $proj.FullName "DataSources") -RsFolder $projRsFolder
-  Publish-Resources  -ApiUrl $ApiUrl -LocalFolder (Join-Path $proj.FullName "Resources")   -RsFolder "$projRsFolder/Resources"
+  # Recursos desde la RAÍZ del proyecto (excluye .rds y Reports/)
+  Publish-ProjectResourcesFromRoot -ApiUrl $ApiUrl -ProjectDir $proj
 
+  # Reportes del proyecto (están en <Proyecto>/Reports)
   $mapArgs = @{
-  ApiUrl             = $ApiUrl
-  LocalReportsFolder = (Join-Path $proj.FullName "Reports")
-  ProjectRsFolder    = $projRsFolder
-  SharedDsFolder     = "$TargetBase/Shared/Data Sources"
+    ApiUrl             = $ApiUrl
+    LocalReportsFolder = (Join-Path $proj.FullName "Reports")
+    ProjectRsFolder    = $projRsFolder
+    SharedDsFolder     = "$TargetBase/Data Sources"   # "/Data Sources"
   }
-
-  Write-Host "mapArgs keys: $(($mapArgs.Keys) -join ', ')"
   Publish-Reports-And-MapDS @mapArgs
 }
+
+Write-Host "Deploy completed (root mode: projects at '/<Proyecto>', shared DS at '/Data Sources')."

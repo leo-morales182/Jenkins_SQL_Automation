@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'SSRS_PC_P7L4NG4' }
+    agent { label 'SSRS_PC_I72AG2B' }
     options { skipDefaultCheckout(true) }
 
   stages {
@@ -90,7 +90,7 @@ pipeline {
 
 
             # Asegurar carpetas base mínimas (si quieres mantener este tramo aquí)
-            $api = "http://desktop-p7l4ng4/ReportServer"
+            $api = "http://desktop-i72ag2b/ReportServer"
             if (-not (Get-RsFolderContent -ReportServerUri $api -Path '/' -ErrorAction SilentlyContinue | ? { $_.TypeName -eq 'Folder' -and $_.Name -eq 'Apps' })) {
                 New-RsFolder -ReportServerUri $api -Path '/' -Name 'Apps' -ErrorAction Stop | Out-Null
                 Write-Host "Creada carpeta: /Apps"
