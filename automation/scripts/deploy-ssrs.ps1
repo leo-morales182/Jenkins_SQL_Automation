@@ -340,12 +340,10 @@ function Publish-ProjectResourcesFromRoot {
 function New-RdsXmlFromMapItem {
   param([Parameter(Mandatory)][pscustomobject] $MapItem)
 
-  # Normaliza y calcula valores sin usar operadores '??' ni '?:' en la interpolación
-  $ext   = [string]$MapItem.type
+  $ext   = [string]$MapItem.type               # "SQL", "SQLAZURE", "OLEDB", etc.
   $conn  = [string]$MapItem.connectionString
-  $mode  = [string]$MapItem.credentialMode  # Store | Integrated | Prompt | None
+  $mode  = [string]$MapItem.credentialMode     # Store | Integrated | Prompt | None
 
-  # Defaults seguros
   $winCreds = $false
   if ($MapItem.PSObject.Properties.Name -contains 'useWindowsCredentials') {
     $winCreds = [bool]$MapItem.useWindowsCredentials
@@ -362,7 +360,6 @@ function New-RdsXmlFromMapItem {
   if ($MapItem.PSObject.Properties.Name -contains 'username') { $user = [string]$MapItem.username }
   if ($MapItem.PSObject.Properties.Name -contains 'password') { $pass = [string]$MapItem.password }
 
-  # SSRS espera <CredentialRetrieval> con uno de: Store | Integrated | Prompt | None
   $credRetrieval = switch -Regex ($mode) {
     '^Store$'      { 'Store';      break }
     '^Integrated$' { 'Integrated'; break }
@@ -372,15 +369,13 @@ function New-RdsXmlFromMapItem {
 
 @"
 <?xml version="1.0" encoding="utf-8"?>
-<DataSourceDefinition xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                      xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+<DataSourceDefinition xmlns="http://schemas.microsoft.com/sqlserver/reporting/2006/03/reportdatasource">
   <Extension>$(Escape-Xml $ext)</Extension>
   <ConnectString>$(Escape-Xml $conn)</ConnectString>
   <CredentialRetrieval>$credRetrieval</CredentialRetrieval>
   <Prompt>$(Escape-Xml $promptText)</Prompt>
   <WindowsCredentials>$([string]$winCreds).ToLower()</WindowsCredentials>
   <ImpersonateUser>false</ImpersonateUser>
-  <Enabled>true</Enabled>
   <UserName>$(Escape-Xml $user)</UserName>
   <Password>$(Escape-Xml $pass)</Password>
 </DataSourceDefinition>
