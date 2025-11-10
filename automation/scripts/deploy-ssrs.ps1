@@ -427,13 +427,13 @@ function Set-SharedDataSourceCredentials {
         if ($supportsOverwrite) {
           $createArgs.Overwrite = $true
           New-RsDataSource @createArgs | Out-Null
-          Write-Host "Actualizado DS (overwrite): $dsPath"
+          Write-Host "Actualizado DS (overwrite): $($dsPath)"
         } else {
           # Sin -Overwrite disponible → eliminar y crear
           if ($removeCmd) {
             Remove-RsCatalogItem -ReportServerUri $ApiUrl -Path $dsPath -Confirm:$false -ErrorAction SilentlyContinue
             New-RsDataSource @createArgs | Out-Null
-            Write-Host "Recreado DS: $dsPath"
+            Write-Host "Recreado DS: $($dsPath)"
           } else {
             # Último recurso: intentar Set-RsDataSource si existe
             if ($setCmd) {
@@ -455,24 +455,24 @@ function Set-SharedDataSourceCredentials {
                 if ($null -ne $ds.useWindowsCredentials) { $setParams.WindowsCredentials = [bool]$ds.useWindowsCredentials }
               }
               Set-RsDataSource @setParams | Out-Null
-              Write-Host "Actualizado DS (Set-RsDataSource): $dsPath"
+              Write-Host "Actualizado DS (Set-RsDataSource): $($dsPath)"
             } else {
-              throw "No hay forma segura de actualizar $dsPath (sin -Overwrite, sin Remove-RsCatalogItem, sin Set-RsDataSource)."
+              throw "No hay forma segura de actualizar $($dsPath) (sin -Overwrite, sin Remove-RsCatalogItem, sin Set-RsDataSource)."
             }
           }
         }
       } else {
         New-RsDataSource @createArgs | Out-Null
-        Write-Host "Creado DS: $dsPath"
+        Write-Host "Creado DS: $($dsPath)"
       }
 
       # Probar conexión si existe el cmdlet (si no, lo omitimos)
       if ($testConnCmd) {
         try {
           Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
-          Write-Host "OK conexión DS: $dsPath"
+          Write-Host "OK conexión DS: $($dsPath)"
         } catch {
-          Write-Warning "Conexión DS falló para $dsPath: $_"
+          Write-Warning "Conexión DS falló para $($dsPath): $_"
         }
       }
 
