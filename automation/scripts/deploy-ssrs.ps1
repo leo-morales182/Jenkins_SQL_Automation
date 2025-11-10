@@ -5,7 +5,7 @@ param(
   [string]$RepoRoot,
   [string]$User,
   [string]$Pass,
-  [string]$EnvMapPath
+  [string]$EnvMapPath                                    # p.ej. C:\...\jenkins_env\datasources.map.dev.json
 )
 
 Set-StrictMode -Version Latest
@@ -20,7 +20,7 @@ if ($User -and $Pass) {
 }
 $script:cred = $cred
 
-# Resolver RepoRoot a la carpeta 'reports'
+# Resolver RepoRoot a la carpeta 'reports' si no viene
 if (-not $RepoRoot -or -not (Test-Path $RepoRoot)) {
   $candidate1 = Join-Path $PSScriptRoot "..\reports"
   $candidate2 = Join-Path $env:WORKSPACE "ssrs\reports"
@@ -65,7 +65,7 @@ function Ensure-RsPath {
       Write-Host "Folder created: $current/$seg"
     }
 
-    if ($current -eq '/') { $current = "/$seg" } else { $current = "$current/$seg" }  # <-- sin ternario
+    if ($current -eq '/') { $current = "/$seg" } else { $current = "$current/$seg" }
   }
 }
 
@@ -77,13 +77,14 @@ function Publish-Resources {
     [Parameter(Mandatory=$true)][string]$RsFolder
   )
   if (-not (Test-Path $LocalFolder)) { return }
-  $files = Get-ChildItem -Path $LocalFolder -File -Recurse
+  $files = Get-ChildItem -Path $LocalFolder -File -Recurse |
+           Where-Object { $_.Extension -in '.jpg', '.png' }
   foreach ($f in $files) {
     $args = @{
       ReportServerUri = $ApiUrl
-      Path           = $f.FullName
-      RsFolder       = (Normalize-RsPath $RsFolder)
-      Overwrite      = $true
+      Path            = $f.FullName
+      RsFolder        = (Normalize-RsPath $RsFolder)
+      Overwrite       = $true
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
@@ -98,14 +99,13 @@ function Publish-DataSources {
     [Parameter(Mandatory=$true)][string]$RsFolder
   )
   if (-not (Test-Path $LocalFolder)) { return }
-  # Include funciona con -Recurse, pero Filter es más eficiente
   $dss = Get-ChildItem -Path $LocalFolder -File -Recurse -Filter *.rds
   foreach ($ds in $dss) {
     $args = @{
       ReportServerUri = $ApiUrl
-      Path           = $ds.FullName
-      RsFolder       = (Normalize-RsPath $RsFolder)
-      Overwrite      = $true
+      Path            = $ds.FullName
+      RsFolder        = (Normalize-RsPath $RsFolder)
+      Overwrite       = $true
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
@@ -124,9 +124,9 @@ function Publish-DataSets {
   foreach ($s in $sets) {
     $args = @{
       ReportServerUri = $ApiUrl
-      Path           = $s.FullName
-      RsFolder       = (Normalize-RsPath $RsFolder)
-      Overwrite      = $true
+      Path            = $s.FullName
+      RsFolder        = (Normalize-RsPath $RsFolder)
+      Overwrite       = $true
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
@@ -183,11 +183,10 @@ function Publish-Reports-And-MapDS {
     return
   }
 
-  # Publicar en /<Proyecto>/Reports
   $destReports = Normalize-RsPath "$ProjectRsFolder/Reports"
   Ensure-RsPath -ApiUrl $ApiUrl -Path $destReports
 
-  # CLAVE: usar -Filter *.rdl (Include a veces no lista nada en PS 5.1)
+  # PS 5.1: usar -Filter
   $rdls = Get-ChildItem -Path $LocalReportsFolder -File -Recurse -Filter *.rdl
   Write-Host "RDL encontrados en '$LocalReportsFolder': $($rdls.Count)"
   if ($rdls.Count -eq 0) { return }
@@ -207,19 +206,14 @@ function Publish-Reports-And-MapDS {
     Write-RsCatalogItem @pubArgs | Out-Null
     Write-Host "RDL publicado: $($rdl.Name) -> $destReports"
 
-    # Re-mapear DS a /Data Sources/<Name> (o respetar absoluto)
+    # Re-mapear DS
     $dsList = Get-RdlDataSourceRefs -RdlPath $rdl.FullName
     $reportItemPath = "$destReports/" + [System.IO.Path]::GetFileNameWithoutExtension($rdl.Name)
 
     foreach ($ds in $dsList) {
       if (-not $ds.Reference) { Write-Host "  - DS '$($ds.Name)' embebido."; continue }
 
-      $targetRef = $null
-      if ($ds.Reference.StartsWith('/')) {
-        $targetRef = $ds.Reference
-      } else {
-        $targetRef = Normalize-RsPath "$SharedDsFolder/$($ds.Reference)"
-      }
+      $targetRef = if ($ds.Reference.StartsWith('/')) { $ds.Reference } else { Normalize-RsPath "$SharedDsFolder/$($ds.Reference)" }
 
       if ([string]::IsNullOrWhiteSpace($ds.Name) -or [string]::IsNullOrWhiteSpace($targetRef)) {
         Write-Warning "  - Parámetros inválidos para '$($rdl.Name)'; se omite."
@@ -250,7 +244,7 @@ function Publish-SharedRdsFromProjects {
 
   Ensure-RsPath -ApiUrl $ApiUrl -Path $SharedDsFolder
 
-  # Tomar .rds en la RAÍZ de cada proyecto (no en Reports/)
+  # .rds en la RAÍZ del proyecto (no dentro de Reports/)
   $allRds = foreach ($proj in $ProjectDirs) {
     Get-ChildItem -Path $proj.FullName -File -Filter *.rds
   }
@@ -272,9 +266,9 @@ function Publish-SharedRdsFromProjects {
     $src = $byName[$name]
     $args = @{
       ReportServerUri = $ApiUrl
-      Path           = $src
-      RsFolder       = (Normalize-RsPath $SharedDsFolder)
-      Overwrite      = $true
+      Path            = $src
+      RsFolder        = (Normalize-RsPath $SharedDsFolder)
+      Overwrite       = $true
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
@@ -282,7 +276,7 @@ function Publish-SharedRdsFromProjects {
   }
 }
 
-# === Recursos del proyecto desde su RAÍZ (excluye .rds y la carpeta Reports) ===
+# === Recursos del proyecto desde su RAÍZ (excluye .rds y Reports/) ===
 function Publish-ProjectResourcesFromRoot {
   param(
     [Parameter(Mandatory=$true)][string]$ApiUrl,
@@ -298,9 +292,9 @@ function Publish-ProjectResourcesFromRoot {
   foreach ($f in $files) {
     $args = @{
       ReportServerUri = $ApiUrl
-      Path           = $f.FullName
-      RsFolder       = (Normalize-RsPath $target)
-      Overwrite      = $true
+      Path            = $f.FullName
+      RsFolder        = (Normalize-RsPath $target)
+      Overwrite       = $true
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
@@ -318,34 +312,52 @@ function Set-SharedDataSourceCredentials {
   if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
   $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
 
-  $hasSetRsDataSource = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
+  # Detectar cmdlet y parámetros soportados
+  $setCmd = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
+  $supportsModule = $false
+  $paramConnName  = $null
+  if ($setCmd) {
+    $pnames = ($setCmd.Parameters.Keys | ForEach-Object { $_.ToLowerInvariant() })
+    if ($pnames -contains 'connectionstring') { $paramConnName = 'ConnectionString'; $supportsModule = $true }
+    elseif ($pnames -contains 'connectstring') { $paramConnName = 'ConnectString'; $supportsModule = $true }
+  }
 
   foreach ($ds in $map.items) {
-    $dsPath = "$SharedDsFolder/$($ds.name)"
+    $dsPath = Normalize-RsPath "$SharedDsFolder/$($ds.name)"
+
+    # Si es Store, levantar credenciales desde variables de entorno (si vienen definidas en el JSON)
     $user=$null;$pass=$null
     if ($ds.credentialMode -eq "Store") {
-      $user = [Environment]::GetEnvironmentVariable($ds.usernameEnv)
-      $pass = [Environment]::GetEnvironmentVariable($ds.passwordEnv)
-      if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
-        throw "Faltan variables $($ds.usernameEnv)/$($ds.passwordEnv) para $($ds.name)"
+      $userEnv = $ds.usernameEnv
+      $passEnv = $ds.passwordEnv
+      if ($userEnv -and $passEnv) {
+        $user = [Environment]::GetEnvironmentVariable($userEnv)
+        $pass = [Environment]::GetEnvironmentVariable($passEnv)
+        if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
+          throw "Faltan variables $userEnv/$passEnv para $($ds.name)"
+        }
+      } else {
+        throw "credentialMode=Store pero falta usernameEnv/passwordEnv para $($ds.name)"
       }
     }
 
     try {
-      if ($hasSetRsDataSource) {
+      if ($supportsModule) {
+        # Usar cmdlet del módulo con el nombre de parámetro correcto
         $p = @{
           ReportServerUri     = $ApiUrl
           Path                = $dsPath
-          ConnectionString    = $ds.connectionString
           Extension           = $ds.type               # SQL|OLEDB|Oracle...
           CredentialRetrieval = $ds.credentialMode     # Store|Integrated|Prompt|None
         }
+        if ($paramConnName) { $p[$paramConnName] = $ds.connectionString }
         if ($ds.credentialMode -eq "Store") {
           $p.UserName = $user; $p.Password = $pass
           if ($null -ne $ds.useWindowsCredentials) { $p.WindowsCredentials = [bool]$ds.useWindowsCredentials }
         }
         Set-RsDataSource @p -ErrorAction Stop
       } else {
+        # Fallback: REST v2.0
         $lookup = Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Post -Url "api/v2.0/PathLookup" -Body (@{path=$dsPath}|ConvertTo-Json) -ContentType "application/json"
         if (-not $lookup -or -not $lookup.Id) { throw "No existe $dsPath" }
         $payload = @{
@@ -364,10 +376,11 @@ function Set-SharedDataSourceCredentials {
         Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Patch -Url "api/v2.0/datasources($($lookup.Id))" -Body ($payload|ConvertTo-Json -Depth 6) -ContentType "application/json" | Out-Null
       }
 
+      # Probar conexión (si el server lo permite)
       Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
       Write-Host "OK DS: $dsPath"
     } catch {
-      Write-Warning "Fallo DS ${dsPath}: $_"   # <-- evita $dsPath:
+      Write-Warning ("Fallo DS {0}: {1}" -f $dsPath, $_)
     }
   }
 }
@@ -375,6 +388,7 @@ function Set-SharedDataSourceCredentials {
 # --- ORQUESTADOR ---
 
 $TargetBase = Normalize-RsPath $TargetBase
+$SharedDsFolder = Normalize-RsPath $SharedDsFolder
 
 # 0) Estructura base en raíz
 Ensure-RsPath -ApiUrl $ApiUrl -Path $TargetBase                # "/"
@@ -383,10 +397,10 @@ Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Data Sources" # "/Data Sources"
 # 1) Proyectos: subcarpetas de RepoRoot
 $projects = Get-ChildItem -Path $RepoRoot -Directory | Where-Object { $_.Name -ne 'Shared' }
 
-# 2) Publicar TODOS los RDS únicos de los proyectos en /Data Sources (raíz)
+# 2) Publicar TODOS los RDS únicos en /Data Sources
 Publish-SharedRdsFromProjects -ApiUrl $ApiUrl -ProjectDirs $projects -SharedDsFolder "$TargetBase/Data Sources"
 
-# 2.1) Aplicar credenciales desde -EnvMapPath si existe (Integrated o Store)
+# 2.1) Aplicar credenciales desde -EnvMapPath si existe (Integrated/None/Prompt/Store)
 if ($EnvMapPath) {
   if (Test-Path $EnvMapPath) {
     Write-Host "Usando mapa de credenciales: $EnvMapPath"
