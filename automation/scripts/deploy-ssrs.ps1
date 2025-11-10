@@ -333,124 +333,99 @@ function Publish-ProjectResourcesFromRoot {
 
 function Set-SharedDataSourceCredentials {
   param(
-    [Parameter(Mandatory)][string] $ApiUrl,
-    [Parameter(Mandatory)][string] $SharedDsFolder, # "/Data Sources"
-    [Parameter(Mandatory)][string] $MappingFile     # p.ej. jenkins_env\datasources.map.dev.json
+    [Parameter(Mandatory)][string] $ApiUrl,           # p.ej. http://localhost/ReportServer
+    [Parameter(Mandatory)][string] $SharedDsFolder,   # "/Data Sources"
+    [Parameter(Mandatory)][string] $MappingFile       # C:\...\jenkins_env\datasources.map.dev.json
   )
 
-  # --- Validaciones iniciales ---
   if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
-  $SharedDsFolder = (Normalize-RsPath $SharedDsFolder)
-  if ($SharedDsFolder -eq "/") { throw "SharedDsFolder no puede ser la raíz '/'" }
-
-  # Asegura la carpeta contenedora
-  Ensure-RsPath -ApiUrl $ApiUrl -Path $SharedDsFolder
-
-  # Cargar mapa
   $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
 
-  # Descubrir parámetros soportados por tu versión del módulo
-  $setCmd = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
-  $newCmd = Get-Command -Name New-RsDataSource -ErrorAction SilentlyContinue
-  if (-not $newCmd) { throw "El módulo ReportingServicesTools no expone New-RsDataSource; actualiza el módulo." }
+  # Normalizar y asegurar carpeta
+  $SharedDsFolder = (Normalize-RsPath $SharedDsFolder)
+  Ensure-RsPath -ApiUrl $ApiUrl -Path $SharedDsFolder
 
-  $supportsSet         = $false
-  $paramConnName       = $null
-  $setParamsLower      = @()
-  if ($setCmd) {
-    $setParamsLower = $setCmd.Parameters.Keys | ForEach-Object { $_.ToLowerInvariant() }
-    if ($setParamsLower -contains 'connectionstring') { $paramConnName = 'ConnectionString'; $supportsSet = $true }
-    elseif ($setParamsLower -contains 'connectstring') { $paramConnName = 'ConnectString';  $supportsSet = $true }
-    else { Write-Warning "Set-RsDataSource está disponible pero no publica parámetro de ConnectionString; se intentará solo con credenciales/flags." }
-  } else {
-    Write-Warning "Set-RsDataSource no está disponible; solo se intentará crear/forzar con New-RsDataSource cuando falte el DS."
+  # ----- Cliente SOAP ReportService2010 -----
+  $wsdl = ($ApiUrl.TrimEnd('/') + "/ReportService2010.asmx?wsdl")
+  $proxyArgs = @{ Uri = $wsdl }
+  if ($script:cred) { $proxyArgs.Credential = $script:cred } else { $proxyArgs.UseDefaultCredential = $true }
+  $rs = New-WebServiceProxy @proxyArgs -Namespace "RS2010" -Class "ReportingService2010"
+
+  # Helper: ¿existe item por nombre en una carpeta?
+  function Get-ItemInFolder([string]$parent, [string]$name, [string]$typeFilter="DataSource") {
+    # ListChildren($parent, $recursive)
+    $items = $rs.ListChildren($parent, $false)
+    if ($null -eq $items) { return $null }
+    return $items | Where-Object { $_.Name -eq $name -and $_.TypeName -eq $typeFilter } | Select-Object -First 1
   }
 
   foreach ($ds in $map.items) {
-    $name  = [string]$ds.name
-    if ([string]::IsNullOrWhiteSpace($name)) { Write-Warning "Entrada de mapa sin 'name'; se omite."; continue }
+    $dsName = [string]$ds.name
+    if ([string]::IsNullOrWhiteSpace($dsName)) { Write-Warning "Ítem sin 'name' en el mapa; se omite."; continue }
 
-    $dsPath = (Normalize-RsPath ("$SharedDsFolder/$name"))
+    $fullPath = (Normalize-RsPath "$SharedDsFolder/$dsName")
 
-    # Resolver credenciales si aplica
-    $user=$null; $pass=$null
-    if ($ds.credentialMode -eq "Store") {
-      if (-not $ds.usernameEnv -or -not $ds.passwordEnv) {
-        throw "credentialMode=Store pero falta usernameEnv/passwordEnv para '$name'"
+    # Definición de DataSource
+    $def = New-Object RS2010.DataSourceDefinition
+    $def.Extension = $ds.type                  # "SQL", "OLEDB", "Oracle", etc.
+    $def.ConnectString = $ds.connectionString  # Ojo: propiedad es ConnectString (SOAP)
+    # Modo de credenciales
+    switch -Regex ($ds.credentialMode) {
+      '^Store$' {
+        if ([string]::IsNullOrWhiteSpace($ds.usernameEnv) -or [string]::IsNullOrWhiteSpace($ds.passwordEnv)) {
+          throw "credentialMode=Store requiere usernameEnv/passwordEnv para $dsName"
+        }
+        $user = [Environment]::GetEnvironmentVariable([string]$ds.usernameEnv)
+        $pass = [Environment]::GetEnvironmentVariable([string]$ds.passwordEnv)
+        if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
+          throw "Faltan variables $($ds.usernameEnv)/$($ds.passwordEnv) para $dsName"
+        }
+        $def.CredentialRetrieval = "Store"
+        $def.UserName = $user
+        $def.Password = $pass
+        if ($null -ne $ds.useWindowsCredentials) { $def.WindowsCredentials = [bool]$ds.useWindowsCredentials }
       }
-      $user = [Environment]::GetEnvironmentVariable([string]$ds.usernameEnv)
-      $pass = [Environment]::GetEnvironmentVariable([string]$ds.passwordEnv)
-      if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
-        throw "Faltan variables $($ds.usernameEnv)/$($ds.passwordEnv) para '$name'"
+      '^Integrated$' {
+        $def.CredentialRetrieval = "Integrated"
+      }
+      '^Prompt$' {
+        $def.CredentialRetrieval = "Prompt"
+        $def.Prompt = [string]($ds.promptText ?? "Enter credentials")
+        if ($null -ne $ds.useWindowsCredentials) { $def.WindowsCredentials = [bool]$ds.useWindowsCredentials }
+      }
+      default {
+        # None u otro
+        $def.CredentialRetrieval = "None"
       }
     }
 
     try {
-      # 1) ¿Existe el DS?
-      $existing = $null
-      try {
-        $existing = Get-RsItem -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop
-      } catch {
-        # Get-RsItem no encontrado en algunas versiones; probamos Get-RsDataSource
-        try {
-          $existing = Get-RsDataSource -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop
-        } catch {
-          $existing = $null
-        }
-      }
+      # ¿Existe ya el DS?
+      $existing = Get-ItemInFolder -parent $SharedDsFolder -name $dsName -typeFilter "DataSource"
 
-      # 2) Si NO existe, crear explícitamente con -Parent (evita el bug del backslash)
-      if (-not $existing) {
-        $newArgs = @{
-          ReportServerUri     = $ApiUrl
-          Name                = $name
-          Parent              = $SharedDsFolder     # <-- PARENT explícito con slash
-          Extension           = [string]$ds.type    # SQL|OLEDB|Oracle...
-          CredentialRetrieval = [string]$ds.credentialMode # Integrated|Store|Prompt|None
-          Overwrite           = $true
-        }
-        if ($ds.connectionString) { $newArgs.ConnectionString = [string]$ds.connectionString }
-        if ($ds.credentialMode -eq "Store") {
-          $newArgs.UserName = $user
-          $newArgs.Password = $pass
-          if ($null -ne $ds.useWindowsCredentials) { $newArgs.WindowsCredentials = [bool]$ds.useWindowsCredentials }
-        }
-        if ($script:cred) { $newArgs.Credential = $script:cred }
-
-        New-RsDataSource @newArgs -ErrorAction Stop | Out-Null
-        Write-Host "Creado DS: $dsPath"
-      }
-      else {
-        Write-Host "Existe DS: $dsPath"
-      }
-
-      # 3) Actualizar propiedades con Set-RsDataSource (si se soporta)
-      if ($supportsSet) {
-        $setArgs = @{
-          ReportServerUri     = $ApiUrl
-          Path                = $dsPath
-          Extension           = [string]$ds.type
-          CredentialRetrieval = [string]$ds.credentialMode
-        }
-        if ($paramConnName -and $ds.connectionString) { $setArgs[$paramConnName] = [string]$ds.connectionString }
-        if ($ds.credentialMode -eq "Store") {
-          $setArgs.UserName = $user; $setArgs.Password = $pass
-          if ($null -ne $ds.useWindowsCredentials) { $setArgs.WindowsCredentials = [bool]$ds.useWindowsCredentials }
-        }
-        if ($script:cred) { $setArgs.Credential = $script:cred }
-
-        Set-RsDataSource @setArgs -ErrorAction Stop
-        Write-Host "Actualizado DS: $dsPath"
+      if ($existing) {
+        # Actualizar
+        $rs.SetDataSourceContents($fullPath, $def)
+        Write-Host "UPDATED DS: $fullPath"
       } else {
-        Write-Warning "No se actualizó $dsPath con Set-RsDataSource por falta de cmdlet/parámetro; quedó con los valores al crearse (si era nuevo)."
+        # Crear (Parent debe ser la carpeta; Name sin path)
+        # CreateDataSource(string DataSource, string Parent, bool Overwrite, DataSourceDefinition Definition, Property[] Properties)
+        $null = $rs.CreateDataSource($dsName, $SharedDsFolder, $true, $def, @())
+        Write-Host "CREATED DS: $fullPath"
       }
 
-      # 4) Probar conexión
-      Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
-      Write-Host "OK DS: $dsPath"
-    }
-    catch {
-      Write-Warning ("Fallo DS {0}: {1}" -f $dsPath, $_.Exception.Message)
+      # (Opcional) intento de prueba de conexión usando SOAP (no siempre disponible)
+      try {
+        # Algunos servidores exponen TestConnectForDataSourceDefinition; si no, se omite silenciosamente
+        if ($rs -and $rs.PSObject.Methods.Name -contains 'TestConnectForDataSourceDefinition') {
+          $null = $rs.TestConnectForDataSourceDefinition($def)
+          Write-Host "TEST OK: $fullPath"
+        }
+      } catch {
+        Write-Verbose "Test de conexión no soportado por este servidor/versión: $fullPath"
+      }
+    } catch {
+      Write-Warning ("Fallo DS {0}: {1}" -f $fullPath, $_.Exception.Message)
     }
   }
 }
