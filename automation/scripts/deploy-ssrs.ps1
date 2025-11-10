@@ -454,7 +454,7 @@ function Publish-RdsFromMap {
       Write-Host "OK DS publicado: $folderNorm/$($item.name)"
     }
     catch {
-      Write-Warning "Fallo publicando DS $($item.name) en $folderNorm: $_"
+      Write-Warning ("Fallo publicando DS {0}: {1}" -f $folderNorm, ($_ | Out-String))
     }
   }
 }
