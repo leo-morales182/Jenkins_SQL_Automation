@@ -4,7 +4,8 @@ param(
   [Parameter()] [string]$TargetBase = "/",              # ahora raíz del servidor SSRS
   [string]$RepoRoot,
   [string]$User,
-  [string]$Pass
+  [string]$Pass,
+  [string]$EnvMapPath
 )
 
 Set-StrictMode -Version Latest
