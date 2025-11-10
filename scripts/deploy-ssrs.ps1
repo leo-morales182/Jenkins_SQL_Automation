@@ -338,7 +338,7 @@ foreach ($proj in $projects) {
     ApiUrl             = $ApiUrl
     LocalReportsFolder = $proj.FullName
     ProjectRsFolder    = $projRsFolder
-    SharedDsFolder     = "$TargetBase/Data Sources"   # "/Data Sources"
+    SharedDsFolder     = "/Data Sources"   # "/Data Sources"
   }
   Publish-Reports-And-MapDS @mapArgs
 }
