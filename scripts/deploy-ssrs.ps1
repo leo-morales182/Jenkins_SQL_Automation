@@ -388,9 +388,8 @@ Publish-SharedRdsFromProjects -ApiUrl $ApiUrl -ProjectDirs $projects -SharedDsFo
 
 #$envMap = Join-Path $RepoRoot "env\datasources.map.$($env:ENV).json"
 Write-Host "Env value: $($env:ENV)"
-$envMap = Join-Path $RepoRoot "env\datasources.map.dev.json"
+$envMap = Join-Path $RepoRoot "jenkins_env\datasources.map.dev.json"
 Set-SharedDataSourceCredentials -ApiUrl $ApiUrl -SharedDsFolder "$TargetBase/Data Sources" -MappingFile $envMap
-
 
 # 3) (Opcional) Si aún manejas Shared DataSets/Resources globales en el repo, puedes comentar/ajustar estas líneas:
 # Publish-DataSets   -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSets")   -RsFolder "$TargetBase/Data Sets"
