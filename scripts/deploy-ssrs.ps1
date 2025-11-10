@@ -334,7 +334,7 @@ foreach ($proj in $projects) {
   # Reportes del proyecto (están en <Proyecto>/Reports)
   $mapArgs = @{
     ApiUrl             = $ApiUrl
-    LocalReportsFolder = (Join-Path $proj.FullName "Reports")
+    LocalReportsFolder = $proj.FullName
     ProjectRsFolder    = $projRsFolder
     SharedDsFolder     = "$TargetBase/Data Sources"   # "/Data Sources"
   }
