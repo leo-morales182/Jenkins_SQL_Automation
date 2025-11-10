@@ -345,7 +345,7 @@ function Set-SharedDataSourceCredentials {
       } else {
         # Fallback REST por si no está ese cmdlet
         $lookup = Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Post -Url "api/v2.0/PathLookup" -Body (@{path=$dsPath}|ConvertTo-Json) -ContentType "application/json"
-        if (-not $lookup -or -not $lookup.Id) { throw "No existe $dsPath" }
+        if (-not $lookup -or -not $lookup.Id) { throw "No existe $($dsPath)" }
         $payload = @{
           Id                  = $lookup.Id
           Name                = $ds.name
