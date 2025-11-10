@@ -364,9 +364,9 @@ function Set-SharedDataSourceCredentials {
 
       # Probar conexión
       Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
-      Write-Host "OK DS: $dsPath"
+      Write-Host "OK DS: $($dsPath)"
     } catch {
-      Write-Warning "Fallo DS $dsPath: $_"
+      Write-Warning "Fallo DS $($dsPath): $_"
     }
   }
 }
