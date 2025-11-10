@@ -286,8 +286,10 @@ function Publish-ProjectResourcesFromRoot {
   Ensure-RsPath -ApiUrl $ApiUrl -Path "/$($ProjectDir.Name)"
   Ensure-RsPath -ApiUrl $ApiUrl -Path $target
 
-  # Sólo archivos de la raíz del proyecto, excepto .rds y .rdl
-  $files = Get-ChildItem -Path $ProjectDir.FullName -File | Where-Object { $_.Extension -notin '.rds','.rdl' }
+  # Solo extensiones permitidas por Write-RsCatalogItem en tu versión: jpg/png
+  $files = Get-ChildItem -Path $ProjectDir.FullName -File |
+           Where-Object { $_.Extension -in '.jpg', '.png' }
+
   foreach ($f in $files) {
     $args = @{
       ReportServerUri = $ApiUrl
@@ -300,6 +302,7 @@ function Publish-ProjectResourcesFromRoot {
     Write-Host "Resource: $($f.Name) -> $target"
   }
 }
+
 
 # --- ORQUESTADOR ---
 
