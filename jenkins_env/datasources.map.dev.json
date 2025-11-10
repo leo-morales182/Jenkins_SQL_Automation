@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "name": "Stores_connection",
+      "type": "SQL",
+      "connectionString": "Data Source=DESKTOP-I72AG2B\\MSSQLSERVER_DEV;Initial Catalog=multilevelDBTest",
+      "credentialMode": "Integrated"
+    },
+    {
+      "name": "Products_connection",
+      "type": "SQL",
+      "connectionString": "Data Source=DESKTOP-I72AG2B\\MSSQLSERVER_DEV;Initial Catalog=multilevelDBTest",
+      "credentialMode": "Integrated"
+    },
+    {
+      "name": "Users_datasource",
+      "type": "SQL",
+      "connectionString": "Data Source=DESKTOP-I72AG2B\\MSSQLSERVER_DEV;Initial Catalog=multilevelDBTest",
+      "credentialMode": "Integrated"
+    }
+  ]
+}
