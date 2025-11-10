@@ -20,7 +20,7 @@ pipeline {
 
     stage('Checkout - Automation Scripts') {
       steps {
-        dir('automation') {
+        dir('automation_repo') {
           checkout([
             $class: 'GitSCM',
             branches: [[name: '*/main']],
@@ -50,11 +50,6 @@ pipeline {
 
     stage('Deploy SSRS') {
       steps {
-        // Usa credenciales almacenadas en Jenkins (tipo "Username with password")
-        //withCredentials([usernamePassword(credentialsId: 'SSRS_Service_Account',
-        //                                  usernameVariable: 'SSRS_USER',
-        //                                  passwordVariable: 'SSRS_PASS')]) {
-
           powershell '''
             $ErrorActionPreference = "Stop"
             $ProgressPreference = "SilentlyContinue"
@@ -64,9 +59,10 @@ pipeline {
             Write-Host "ENV: ${env:ENV}"
 
             # Rutas
-            $script     = Join-Path $env:WORKSPACE "automation\\scripts\\deploy-ssrs.ps1"
-            $repoRoot   = Join-Path $env:WORKSPACE "ssrs\\reports"
-            $envMapPath = Join-Path $env:WORKSPACE ("automation\\jenkins_env\\datasources.map.{0}.json" -f $env:ENV)
+            $autoRoot   = Join-Path $env:WORKSPACE "automation_repo"
+            $script     = Join-Path $autoRoot "automation\\scripts\\deploy-ssrs.ps1"
+            $envMapPath = Join-Path $autoRoot ("jenkins_env\\datasources.map.{0}.json" -f $env:ENV)
+
 
             if (-not (Test-Path $script)) {
               throw "No encuentro el script: $script (revisa repo Jenkins_SQL_Automation)."
@@ -120,7 +116,6 @@ pipeline {
               -RepoRoot  $repoRoot `
               -EnvMapPath $envMapPath
           '''
-        // } // Cierrre de credentials
       }
     }
   }
