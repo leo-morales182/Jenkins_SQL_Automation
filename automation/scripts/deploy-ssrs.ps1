@@ -341,77 +341,82 @@ function Set-SharedDataSourceCredentials {
   if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
   $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
 
-  # Detectar cmdlet del módulo y parámetros soportados
+  # Normaliza carpeta y asegura que exista
+  $SharedDsFolder = (Normalize-RsPath $SharedDsFolder)
+  Ensure-RsPath -ApiUrl $ApiUrl -Path $SharedDsFolder
+
+  # Descubre cmdlets disponibles en tu versión del módulo
+  $newCmd = Get-Command -Name New-RsDataSource -ErrorAction SilentlyContinue
   $setCmd = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
-  $supportsModule = $false
-  $paramConnName  = $null
-  if ($setCmd) {
-    $pnames = ($setCmd.Parameters.Keys | ForEach-Object { $_.ToLowerInvariant() })
-    if ($pnames -contains 'connectionstring') { $paramConnName = 'ConnectionString'; $supportsModule = $true }
-    elseif ($pnames -contains 'connectstring') { $paramConnName = 'ConnectString'; $supportsModule = $true }
+
+  if (-not $newCmd -and -not $setCmd) {
+    throw "No encuentro ni New-RsDataSource ni Set-RsDataSource en ReportingServicesTools. Revisa que el módulo se importó correctamente."
   }
 
   foreach ($ds in $map.items) {
-    $dsPath = Normalize-RsPath "$SharedDsFolder/$($ds.name)"
+    # Ruta y nombre finales
+    $dsPath  = Normalize-RsPath "$SharedDsFolder/$($ds.name)"
+    $dsName  = Split-Path $dsPath -Leaf
+    $dsFolder= Split-Path $dsPath -Parent
 
-    # Si es Store, levantar credenciales desde variables de entorno
-    $user=$null;$pass=$null
+    # Carga credenciales si es Store
+    $user = $null; $pass = $null; $winCred = $null
     if ($ds.credentialMode -eq "Store") {
-      $userEnv = $ds.usernameEnv
-      $passEnv = $ds.passwordEnv
-      if ($userEnv -and $passEnv) {
-        $user = [Environment]::GetEnvironmentVariable($userEnv)
-        $pass = [Environment]::GetEnvironmentVariable($passEnv)
-        if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
-          throw "Faltan variables $userEnv/$passEnv para $($ds.name)"
-        }
-      } else {
+      if (-not $ds.usernameEnv -or -not $ds.passwordEnv) {
         throw "credentialMode=Store pero falta usernameEnv/passwordEnv para $($ds.name)"
       }
+      $user = [Environment]::GetEnvironmentVariable($ds.usernameEnv)
+      $pass = [Environment]::GetEnvironmentVariable($ds.passwordEnv)
+      if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
+        throw "Faltan variables $($ds.usernameEnv)/$($ds.passwordEnv) para $($ds.name)"
+      }
+      if ($null -ne $ds.useWindowsCredentials) { $winCred = [bool]$ds.useWindowsCredentials }
     }
 
     try {
-      if ($supportsModule) {
-        # Usar cmdlet del módulo
+      if ($newCmd) {
+        # Método recomendado: re-crear/actualizar con New-RsDataSource -Overwrite
+        $p = @{
+          ReportServerUri     = $ApiUrl
+          RsFolder            = $dsFolder
+          Name                = $dsName
+          Extension           = $ds.type               # SQL | OLEDB | Oracle ...
+          ConnectionString    = $ds.connectionString
+          CredentialRetrieval = $ds.credentialMode     # Integrated | Store | Prompt | None
+          Overwrite           = $true
+        }
+        if ($ds.credentialMode -eq "Store") {
+          $p.UserName = $user; $p.Password = $pass
+          if ($null -ne $winCred) { $p.WindowsCredentials = $winCred }
+        }
+        New-RsDataSource @p -ErrorAction Stop | Out-Null
+      }
+      elseif ($setCmd) {
+        # Alternativa: Set-RsDataSource (nombres de parámetros varían según versión)
+        $paramNames = ($setCmd.Parameters.Keys | ForEach-Object { $_.ToLowerInvariant() })
         $p = @{
           ReportServerUri     = $ApiUrl
           Path                = $dsPath
-          Extension           = $ds.type               # SQL|OLEDB|Oracle...
-          CredentialRetrieval = $ds.credentialMode     # Store|Integrated|Prompt|None
-        }
-        if ($paramConnName) { $p[$paramConnName] = $ds.connectionString }
-        if ($ds.credentialMode -eq "Store") {
-          $p.UserName = $user; $p.Password = $pass
-          if ($null -ne $ds.useWindowsCredentials) { $p.WindowsCredentials = [bool]$ds.useWindowsCredentials }
-        }
-        Set-RsDataSource @p -ErrorAction Stop
-      } else {
-        # Fallback: REST v2.0 con nuestro wrapper
-        # 1) PathLookup
-        $lookup = Invoke-SSRSRest -ApiUrl $ApiUrl -Method Post -RelativeUrl "api/v2.0/PathLookup" -Body @{ path = $dsPath }
-        if (-not $lookup -or -not $lookup.Id) { throw "No existe $dsPath" }
-
-        # 2) Patch datasource
-        $payload = @{
-          Id                  = $lookup.Id
-          Name                = $ds.name
-          Path                = $dsPath
-          Type                = "DataSource"
-          DataSourceType      = $ds.type
-          ConnectionString    = $ds.connectionString
+          Extension           = $ds.type
           CredentialRetrieval = $ds.credentialMode
         }
+        if ($paramNames -contains 'connectionstring') { $p.ConnectionString = $ds.connectionString }
+        elseif ($paramNames -contains 'connectstring') { $p.ConnectString = $ds.connectionString }
+
         if ($ds.credentialMode -eq "Store") {
-          $payload.Username = $user; $payload.Password = $pass
-          if ($null -ne $ds.useWindowsCredentials) { $payload.WindowsCredentials = [bool]$ds.useWindowsCredentials }
+          $p.UserName = $user; $p.Password = $pass
+          if ($null -ne $winCred -and ($paramNames -contains 'windowscredentials')) {
+            $p.WindowsCredentials = $winCred
+          }
         }
-        Invoke-SSRSRest -ApiUrl $ApiUrl -Method Patch -RelativeUrl ("api/v2.0/datasources({0})" -f $lookup.Id) -Body $payload | Out-Null
+        Set-RsDataSource @p -ErrorAction Stop | Out-Null
       }
 
-      # Probar conexión
+      # Probar conexión (siempre por Path final)
       Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
       Write-Host "OK DS: $dsPath"
-    } catch {
+    }
+    catch {
       Write-Warning ("Fallo DS {0}: {1}" -f $dsPath, $_)
     }
   }
