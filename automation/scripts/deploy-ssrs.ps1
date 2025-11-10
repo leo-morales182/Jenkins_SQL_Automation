@@ -303,7 +303,7 @@ function Publish-SharedRdsFromProjects {
       ReportServerUri = $ApiUrl
       Path            = $src
       RsFolder        = (Normalize-RsPath $SharedDsFolder)
-      Overwrite       = $true
+      Overwrite       = $false # Verificar este parámetro para cada run distinta
     }
     if ($script:cred) { $args.Credential = $script:cred }
     Write-RsCatalogItem @args | Out-Null
@@ -491,6 +491,9 @@ Ensure-RsPath -ApiUrl $ApiUrl -Path "$TargetBase/Data Sources" # "/Data Sources"
 # 1) Proyectos: subcarpetas de RepoRoot
 $projects = Get-ChildItem -Path $RepoRoot -Directory | Where-Object { $_.Name -ne 'Shared' }
 
+# 2.1) (Opcional) Publicar .rds del repositorio para completar los que no estén en el mapa
+Publish-SharedRdsFromProjects -ApiUrl $ApiUrl -ProjectDirs $projects -SharedDsFolder "$TargetBase/Data Sources"
+
 # 2) Publicar/actualizar los DataSources desde el mapa (genera .rds y los sube con overwrite)
 if ($EnvMapPath -and (Test-Path $EnvMapPath)) {
   Write-Host "Publicando DS desde mapa: $EnvMapPath"
@@ -498,10 +501,6 @@ if ($EnvMapPath -and (Test-Path $EnvMapPath)) {
 } else {
   Write-Warning "No se encontró -EnvMapPath (o archivo no existe); se omitirá la publicación de DS por mapa."
 }
-
-# 2.1) (Opcional) Publicar .rds del repositorio para completar los que no estén en el mapa
-Publish-SharedRdsFromProjects -ApiUrl $ApiUrl -ProjectDirs $projects -SharedDsFolder "$TargetBase/Data Sources"
-
 
 # 3) Publicar cada proyecto en raíz
 foreach ($proj in $projects) {
