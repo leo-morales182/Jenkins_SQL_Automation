@@ -51,9 +51,9 @@ pipeline {
     stage('Deploy SSRS') {
       steps {
         // Usa credenciales almacenadas en Jenkins (tipo "Username with password")
-        withCredentials([usernamePassword(credentialsId: 'SSRS_Service_Account',
-                                          usernameVariable: 'SSRS_USER',
-                                          passwordVariable: 'SSRS_PASS')]) {
+        //withCredentials([usernamePassword(credentialsId: 'SSRS_Service_Account',
+        //                                  usernameVariable: 'SSRS_USER',
+        //                                  passwordVariable: 'SSRS_PASS')]) {
 
           powershell '''
             $ErrorActionPreference = "Stop"
@@ -118,9 +118,7 @@ pipeline {
               -ApiUrl    "${env:API_URL}" `
               -TargetBase "/" `
               -RepoRoot  $repoRoot `
-              -EnvMapPath $envMapPath `
-              -User      "${env:SSRS_USER}" `
-              -Pass      "${env:SSRS_PASS}"
+              -EnvMapPath $envMapPath
           '''
         }
       }
