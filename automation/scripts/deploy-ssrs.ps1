@@ -390,7 +390,7 @@ function Set-SharedDataSourceCredentials {
       $children = Get-RsFolderContent -ReportServerUri $ApiUrl -Path $SharedDsFolder -ErrorAction Stop
       if ($children | Where-Object { $_.TypeName -eq 'DataSource' -and $_.Name -eq $dsName }) { $exists = $true }
     } catch {
-      Write-Warning "No pude listar $SharedDsFolder: $_"
+      Write-Warning "No pude listar $($SharedDsFolder): $_"
     }
 
     # Construir args para crear/actualizar
