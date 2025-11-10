@@ -212,6 +212,8 @@ function Publish-Reports-And-MapDS {
         $targetRef = "$SharedDsFolder/$($ds.Reference)"
       }
 
+      Write-Host "Targetref value: $($targetRef)"
+
       # Confirmar y aplicar
       if ([string]::IsNullOrWhiteSpace($ds.Name) -or [string]::IsNullOrWhiteSpace($targetRef)) {
         Write-Warning "  - Parámetros inválidos para '$($rdl.Name)'; se omite."
