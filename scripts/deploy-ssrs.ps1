@@ -188,7 +188,7 @@ function Publish-Reports-And-MapDS {
     $pubArgs = @{
       ReportServerUri = $ApiUrl
       Path           = $rdl.FullName
-      RsFolder       = (Normalize-RsPath "$ProjectRsFolder/Reports")
+      RsFolder       = (Normalize-RsPath "$ProjectRsFolder")
       Overwrite      = $true
     }
     if ($script:cred) { $pubArgs.Credential = $script:cred }
