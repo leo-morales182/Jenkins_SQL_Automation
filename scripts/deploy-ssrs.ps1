@@ -305,6 +305,72 @@ function Publish-ProjectResourcesFromRoot {
   }
 }
 
+function Set-SharedDataSourceCredentials {
+  param(
+    [Parameter(Mandatory)][string] $ApiUrl,
+    [Parameter(Mandatory)][string] $SharedDsFolder, # "/Data Sources"
+    [Parameter(Mandatory)][string] $MappingFile     # p.ej. repo\env\datasources.map.PROD.json
+  )
+
+  if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
+  $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
+
+  $hasSetRsDataSource = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
+
+  foreach ($ds in $map.items) {
+    $dsPath = "$SharedDsFolder/$($ds.name)"
+    $user=$null;$pass=$null
+    if ($ds.credentialMode -eq "Store") {
+      $user = [Environment]::GetEnvironmentVariable($ds.usernameEnv)
+      $pass = [Environment]::GetEnvironmentVariable($ds.passwordEnv)
+      if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
+        throw "Faltan variables $($ds.usernameEnv)/$($ds.passwordEnv) para $($ds.name)"
+      }
+    }
+
+    try {
+      if ($hasSetRsDataSource) {
+        $p = @{
+          ReportServerUri     = $ApiUrl
+          Path                = $dsPath
+          ConnectionString    = $ds.connectionString
+          Extension           = $ds.type               # SQL|OLEDB|Oracle...
+          CredentialRetrieval = $ds.credentialMode     # Store|Integrated|Prompt|None
+        }
+        if ($ds.credentialMode -eq "Store") {
+          $p.UserName = $user; $p.Password = $pass
+          if ($null -ne $ds.useWindowsCredentials) { $p.WindowsCredentials = [bool]$ds.useWindowsCredentials }
+        }
+        Set-RsDataSource @p -ErrorAction Stop
+      } else {
+        # Fallback REST por si no está ese cmdlet
+        $lookup = Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Post -Url "api/v2.0/PathLookup" -Body (@{path=$dsPath}|ConvertTo-Json) -ContentType "application/json"
+        if (-not $lookup -or -not $lookup.Id) { throw "No existe $dsPath" }
+        $payload = @{
+          Id                  = $lookup.Id
+          Name                = $ds.name
+          Path                = $dsPath
+          Type                = "DataSource"
+          DataSourceType      = $ds.type
+          ConnectionString    = $ds.connectionString
+          CredentialRetrieval = $ds.credentialMode
+        }
+        if ($ds.credentialMode -eq "Store") {
+          $payload.Username = $user; $payload.Password = $pass
+          if ($null -ne $ds.useWindowsCredentials) { $payload.WindowsCredentials = [bool]$ds.useWindowsCredentials }
+        }
+        Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Patch -Url "api/v2.0/datasources($($lookup.Id))" -Body ($payload|ConvertTo-Json -Depth 6) -ContentType "application/json" | Out-Null
+      }
+
+      # Probar conexión
+      Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
+      Write-Host "OK DS: $dsPath"
+    } catch {
+      Write-Warning "Fallo DS $dsPath: $_"
+    }
+  }
+}
+
 
 # --- ORQUESTADOR ---
 
@@ -319,6 +385,12 @@ $projects = Get-ChildItem -Path $RepoRoot -Directory | Where-Object { $_.Name -n
 
 # 2) Publicar TODOS los RDS únicos de los proyectos en /Data Sources (raíz)
 Publish-SharedRdsFromProjects -ApiUrl $ApiUrl -ProjectDirs $projects -SharedDsFolder "$TargetBase/Data Sources"
+
+#$envMap = Join-Path $RepoRoot "env\datasources.map.$($env:ENV).json"
+Write-Host "Env value: $($env:ENV)"
+$envMap = Join-Path $RepoRoot "env\datasources.map.dev.json"
+Set-SharedDataSourceCredentials -ApiUrl $ApiUrl -SharedDsFolder "$TargetBase/Data Sources" -MappingFile $envMap
+
 
 # 3) (Opcional) Si aún manejas Shared DataSets/Resources globales en el repo, puedes comentar/ajustar estas líneas:
 # Publish-DataSets   -ApiUrl $ApiUrl -LocalFolder (Join-Path $RepoRoot "Shared\DataSets")   -RsFolder "$TargetBase/Data Sets"
