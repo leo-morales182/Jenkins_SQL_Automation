@@ -69,6 +69,35 @@ function Ensure-RsPath {
   }
 }
 
+# --- Wrapper REST propio (evita Invoke-RsRestMethod) ---
+function Invoke-SSRSRest {
+  param(
+    [Parameter(Mandatory)][string]$ApiUrl,      # http://server/ReportServer
+    [Parameter(Mandatory)][string]$Method,      # GET|POST|PATCH
+    [Parameter(Mandatory)][string]$RelativeUrl, # ej: api/v2.0/PathLookup
+    [Parameter()][object]$Body
+  )
+  $uri = ($ApiUrl.TrimEnd('/') + '/' + $RelativeUrl.TrimStart('/'))
+  $common = @{
+    Uri                  = $uri
+    Method               = $Method
+    ContentType          = 'application/json'
+    UseDefaultCredentials= $true
+    ErrorAction          = 'Stop'
+  }
+  if ($script:cred) {
+    $common.Remove('UseDefaultCredentials')
+    $common.Credential = $script:cred
+  }
+
+  if ($PSBoundParameters.ContainsKey('Body') -and $Body -ne $null) {
+    $json = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 8 }
+    $common.Body = $json
+  }
+
+  return Invoke-RestMethod @common
+}
+
 # --- Publicadores ---
 function Publish-Resources {
   param(
@@ -99,7 +128,7 @@ function Publish-DataSources {
     [Parameter(Mandatory=$true)][string]$RsFolder
   )
   if (-not (Test-Path $LocalFolder)) { return }
-  $dss = Get-ChildItem -Path $LocalFolder -File -Recurse -Filter *.rds
+  $dss = @(Get-ChildItem -Path $LocalFolder -File -Recurse -Filter *.rds)
   foreach ($ds in $dss) {
     $args = @{
       ReportServerUri = $ApiUrl
@@ -120,7 +149,7 @@ function Publish-DataSets {
     [Parameter(Mandatory=$true)][string]$RsFolder
   )
   if (-not (Test-Path $LocalFolder)) { return }
-  $sets = Get-ChildItem -Path $LocalFolder -File -Recurse -Filter *.rsd
+  $sets = @(Get-ChildItem -Path $LocalFolder -File -Recurse -Filter *.rsd)
   foreach ($s in $sets) {
     $args = @{
       ReportServerUri = $ApiUrl
@@ -168,26 +197,26 @@ function Get-RdlDataSourceRefs {
     }
   }
 
-  throw "DataSources can't be readen from the RDL (namespace no reconocido o estructura inesperada)."
+  throw "DataSources can't be read from the RDL (namespace no reconocido o estructura inesperada)."
 }
 
 function Publish-Reports-And-MapDS {
   param(
     [Parameter(Mandatory=$true)][string]$ApiUrl,
-    [Parameter(Mandatory=$true)][string]$LocalReportsFolder,
-    [Parameter(Mandatory=$true)][string]$ProjectRsFolder,      # /<Proyecto>
-    [Parameter(Mandatory=$true)][string]$SharedDsFolder        # /Data Sources
+    [Parameter(Mandatory=$true)][string]$LocalReportsFolder,  # carpeta del proyecto que contiene los .rdl (puede ser raíz del proyecto)
+    [Parameter(Mandatory=$true)][string]$ProjectRsFolder,     # /<Proyecto>
+    [Parameter(Mandatory=$true)][string]$SharedDsFolder       # /Data Sources
   )
   if (-not (Test-Path $LocalReportsFolder)) {
     Write-Warning "Carpeta de RDL no existe: $LocalReportsFolder"
     return
   }
 
-  $destReports = Normalize-RsPath "$ProjectRsFolder"
+  $destReports = Normalize-RsPath $ProjectRsFolder
   Ensure-RsPath -ApiUrl $ApiUrl -Path $destReports
 
-  # PS 5.1: usar -Filter
-  $rdls = Get-ChildItem -Path $LocalReportsFolder -File -Recurse -Filter *.rdl
+  # Forzar array
+  $rdls = @(Get-ChildItem -Path $LocalReportsFolder -File -Recurse -Filter *.rdl)
   Write-Host "RDL encontrados en '$LocalReportsFolder': $($rdls.Count)"
   if ($rdls.Count -eq 0) { return }
 
@@ -312,7 +341,7 @@ function Set-SharedDataSourceCredentials {
   if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
   $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
 
-  # Detectar cmdlet y parámetros soportados
+  # Detectar cmdlet del módulo y parámetros soportados
   $setCmd = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
   $supportsModule = $false
   $paramConnName  = $null
@@ -325,7 +354,7 @@ function Set-SharedDataSourceCredentials {
   foreach ($ds in $map.items) {
     $dsPath = Normalize-RsPath "$SharedDsFolder/$($ds.name)"
 
-    # Si es Store, levantar credenciales desde variables de entorno (si vienen definidas en el JSON)
+    # Si es Store, levantar credenciales desde variables de entorno
     $user=$null;$pass=$null
     if ($ds.credentialMode -eq "Store") {
       $userEnv = $ds.usernameEnv
@@ -343,7 +372,7 @@ function Set-SharedDataSourceCredentials {
 
     try {
       if ($supportsModule) {
-        # Usar cmdlet del módulo con el nombre de parámetro correcto
+        # Usar cmdlet del módulo
         $p = @{
           ReportServerUri     = $ApiUrl
           Path                = $dsPath
@@ -357,9 +386,12 @@ function Set-SharedDataSourceCredentials {
         }
         Set-RsDataSource @p -ErrorAction Stop
       } else {
-        # Fallback: REST v2.0
-        $lookup = Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Post -Url "api/v2.0/PathLookup" -Body (@{path=$dsPath}|ConvertTo-Json) -ContentType "application/json"
+        # Fallback: REST v2.0 con nuestro wrapper
+        # 1) PathLookup
+        $lookup = Invoke-SSRSRest -ApiUrl $ApiUrl -Method Post -RelativeUrl "api/v2.0/PathLookup" -Body @{ path = $dsPath }
         if (-not $lookup -or -not $lookup.Id) { throw "No existe $dsPath" }
+
+        # 2) Patch datasource
         $payload = @{
           Id                  = $lookup.Id
           Name                = $ds.name
@@ -373,10 +405,10 @@ function Set-SharedDataSourceCredentials {
           $payload.Username = $user; $payload.Password = $pass
           if ($null -ne $ds.useWindowsCredentials) { $payload.WindowsCredentials = [bool]$ds.useWindowsCredentials }
         }
-        Invoke-RsRestMethod -ReportServerUri $ApiUrl -Method Patch -Url "api/v2.0/datasources($($lookup.Id))" -Body ($payload|ConvertTo-Json -Depth 6) -ContentType "application/json" | Out-Null
+        Invoke-SSRSRest -ApiUrl $ApiUrl -Method Patch -RelativeUrl ("api/v2.0/datasources({0})" -f $lookup.Id) -Body $payload | Out-Null
       }
 
-      # Probar conexión (si el server lo permite)
+      # Probar conexión
       Test-RsDataSourceConnection -ReportServerUri $ApiUrl -Path $dsPath -ErrorAction Stop | Out-Null
       Write-Host "OK DS: $dsPath"
     } catch {
@@ -421,7 +453,7 @@ foreach ($proj in $projects) {
   # Recursos desde la RAÍZ del proyecto (excluye .rds y Reports/)
   Publish-ProjectResourcesFromRoot -ApiUrl $ApiUrl -ProjectDir $proj
 
-  # Reportes del proyecto (en <Proyecto>/Reports)
+  # Reportes del proyecto (tu estructura actual: los .rdl están en la raíz del proyecto)
   $mapArgs = @{
     ApiUrl             = $ApiUrl
     LocalReportsFolder = $proj.FullName
