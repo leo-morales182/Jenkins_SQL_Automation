@@ -34,6 +34,12 @@ Write-Host "RepoRoot: $RepoRoot"
 $SharedDsFolder = "/Data Sources"
 
 # --- Helpers SSRS ---
+function Escape-Xml {
+  param([string]$s)
+  if ($null -eq $s) { return "" }
+  return [System.Security.SecurityElement]::Escape([string]$s)
+}
+
 function Normalize-RsPath {
   param([Parameter(Mandatory=$true)][string]$Path)
   $p = $Path.Trim().Replace('\','/')
@@ -332,24 +338,51 @@ function Publish-ProjectResourcesFromRoot {
 }
 
 function New-RdsXmlFromMapItem {
-  param(
-    [Parameter(Mandatory)][pscustomobject] $MapItem   # un objeto de $map.items[*]
-  )
-  # Construimos un .rds válido (DataSourceDefinition) en texto
-  # Soporta credentialMode: Store | Integrated | Prompt | None
+  param([Parameter(Mandatory)][pscustomobject] $MapItem)
+
+  # Normaliza y calcula valores sin usar operadores '??' ni '?:' en la interpolación
+  $ext   = [string]$MapItem.type
+  $conn  = [string]$MapItem.connectionString
+  $mode  = [string]$MapItem.credentialMode  # Store | Integrated | Prompt | None
+
+  # Defaults seguros
+  $winCreds = $false
+  if ($MapItem.PSObject.Properties.Name -contains 'useWindowsCredentials') {
+    $winCreds = [bool]$MapItem.useWindowsCredentials
+  }
+
+  $promptText = 'Enter credentials'
+  if ($mode -ieq 'Prompt' -and $MapItem.PSObject.Properties.Name -contains 'promptText' -and
+      -not [string]::IsNullOrWhiteSpace($MapItem.promptText)) {
+    $promptText = [string]$MapItem.promptText
+  }
+
+  $user = ''
+  $pass = ''
+  if ($MapItem.PSObject.Properties.Name -contains 'username') { $user = [string]$MapItem.username }
+  if ($MapItem.PSObject.Properties.Name -contains 'password') { $pass = [string]$MapItem.password }
+
+  # SSRS espera <CredentialRetrieval> con uno de: Store | Integrated | Prompt | None
+  $credRetrieval = switch -Regex ($mode) {
+    '^Store$'      { 'Store';      break }
+    '^Integrated$' { 'Integrated'; break }
+    '^Prompt$'     { 'Prompt';     break }
+    default        { 'None' }
+  }
+
 @"
 <?xml version="1.0" encoding="utf-8"?>
 <DataSourceDefinition xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                       xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <Extension>$($MapItem.type)</Extension>
-  <ConnectString>$([System.Security.SecurityElement]::Escape($MapItem.connectionString))</ConnectString>
-  <IntegratedSecurity>$([string]($MapItem.credentialMode -eq 'Integrated')).ToLower()</IntegratedSecurity>
-  <Prompt>$([System.Security.SecurityElement]::Escape($MapItem.promptText ? $MapItem.promptText : 'Enter credentials'))</Prompt>
-  <WindowsCredentials>$([string]([bool]$MapItem.useWindowsCredentials)).ToLower()</WindowsCredentials>
+  <Extension>$(Escape-Xml $ext)</Extension>
+  <ConnectString>$(Escape-Xml $conn)</ConnectString>
+  <CredentialRetrieval>$credRetrieval</CredentialRetrieval>
+  <Prompt>$(Escape-Xml $promptText)</Prompt>
+  <WindowsCredentials>$([string]$winCreds).ToLower()</WindowsCredentials>
   <ImpersonateUser>false</ImpersonateUser>
   <Enabled>true</Enabled>
-  <UserName>$([System.Security.SecurityElement]::Escape($MapItem.username))</UserName>
-  <Password>$([System.Security.SecurityElement]::Escape($MapItem.password))</Password>
+  <UserName>$(Escape-Xml $user)</UserName>
+  <Password>$(Escape-Xml $pass)</Password>
 </DataSourceDefinition>
 "@
 }
@@ -364,50 +397,50 @@ function Publish-RdsFromMap {
   if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
   $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
 
-  # Asegurar carpeta destino
-  Ensure-RsPath -ApiUrl $ApiUrl -Path $SharedDsFolder
-  $folderNorm = (Normalize-RsPath $SharedDsFolder)
+  # Garantiza carpeta destino
+  $folderNorm = Normalize-RsPath $SharedDsFolder
+  Ensure-RsPath -ApiUrl $ApiUrl -Path $folderNorm
 
-  foreach ($ds in $map.items) {
-    # Resolver credenciales según credentialMode
-    $user = $null; $pass = $null
-    switch ($ds.credentialMode) {
+  foreach ($item in $map.items) {
+    # Resuelve credenciales según mode y env vars (si aplica)
+    switch ($item.credentialMode) {
       'Store' {
-        if (-not $ds.usernameEnv -or -not $ds.passwordEnv) {
-          throw "credentialMode=Store pero falta usernameEnv/passwordEnv para $($ds.name)"
+        if (-not $item.usernameEnv -or -not $item.passwordEnv) {
+          throw "credentialMode=Store pero falta usernameEnv/passwordEnv para $($item.name)"
         }
-        $user = [Environment]::GetEnvironmentVariable($ds.usernameEnv)
-        $pass = [Environment]::GetEnvironmentVariable($ds.passwordEnv)
-        if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
-          throw "Faltan variables $($ds.usernameEnv)/$($ds.passwordEnv) para $($ds.name)"
+        $u = [Environment]::GetEnvironmentVariable([string]$item.usernameEnv)
+        $p = [Environment]::GetEnvironmentVariable([string]$item.passwordEnv)
+        if ([string]::IsNullOrWhiteSpace($u) -or [string]::IsNullOrWhiteSpace($p)) {
+          throw "Faltan variables $($item.usernameEnv)/$($item.passwordEnv) para $($item.name)"
         }
-        $ds | Add-Member -NotePropertyName username -NotePropertyValue $user -Force
-        $ds | Add-Member -NotePropertyName password -NotePropertyValue $pass -Force
-      }
-      'Integrated' {
-        $ds | Add-Member -NotePropertyName username -NotePropertyValue '' -Force
-        $ds | Add-Member -NotePropertyName password -NotePropertyValue '' -Force
+        # Anexa campos concretos que la función New-RdsXmlFromMapItem consume
+        $item | Add-Member -NotePropertyName username -NotePropertyValue $u -Force
+        $item | Add-Member -NotePropertyName password -NotePropertyValue $p -Force
       }
       'Prompt' {
-        # Si no viene promptText, ponemos uno por defecto
-        if (-not $ds.PSObject.Properties.Name -contains 'promptText' -or [string]::IsNullOrWhiteSpace($ds.promptText)) {
-          $ds | Add-Member -NotePropertyName promptText -NotePropertyValue 'Enter credentials' -Force
+        if (-not $item.PSObject.Properties.Name -contains 'promptText' -or
+            [string]::IsNullOrWhiteSpace($item.promptText)) {
+          $item | Add-Member -NotePropertyName promptText -NotePropertyValue 'Enter credentials' -Force
         }
-        $ds | Add-Member -NotePropertyName username -NotePropertyValue '' -Force
-        $ds | Add-Member -NotePropertyName password -NotePropertyValue '' -Force
+        $item | Add-Member -NotePropertyName username -NotePropertyValue '' -Force
+        $item | Add-Member -NotePropertyName password -NotePropertyValue '' -Force
+      }
+      'Integrated' {
+        $item | Add-Member -NotePropertyName username -NotePropertyValue '' -Force
+        $item | Add-Member -NotePropertyName password -NotePropertyValue '' -Force
       }
       default { # None
-        $ds | Add-Member -NotePropertyName username -NotePropertyValue '' -Force
-        $ds | Add-Member -NotePropertyName password -NotePropertyValue '' -Force
+        $item | Add-Member -NotePropertyName username -NotePropertyValue '' -Force
+        $item | Add-Member -NotePropertyName password -NotePropertyValue '' -Force
       }
     }
 
-    # Generar archivo .rds temporal basado en el mapa
-    $xml = New-RdsXmlFromMapItem -MapItem $ds
-    $tmp = Join-Path $env:TEMP ("{0}.rds" -f $ds.name)
+    # Genera .rds temporal con el nombre correcto del ítem
+    $xml = New-RdsXmlFromMapItem -MapItem $item
+    $tmp = Join-Path $env:TEMP ("{0}.rds" -f [IO.Path]::GetFileNameWithoutExtension($item.name))
     Set-Content -Path $tmp -Value $xml -Encoding UTF8
 
-    # Publicar/Actualizar el DS con Write-RsCatalogItem (sobrescribe)
+    # Sube/actualiza el DS como ítem de catálogo (sin 'Parent' ni REST manual)
     $args = @{
       ReportServerUri = $ApiUrl
       Path            = $tmp
@@ -415,8 +448,14 @@ function Publish-RdsFromMap {
       Overwrite       = $true
     }
     if ($script:cred) { $args.Credential = $script:cred }
-    Write-RsCatalogItem @args | Out-Null
-    Write-Host "OK DS publicado (overwrite): $folderNorm/$($ds.name)"
+
+    try {
+      Write-RsCatalogItem @args | Out-Null
+      Write-Host "OK DS publicado: $folderNorm/$($item.name)"
+    }
+    catch {
+      Write-Warning "Fallo publicando DS $($item.name) en $folderNorm: $_"
+    }
   }
 }
 
