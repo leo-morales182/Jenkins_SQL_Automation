@@ -120,7 +120,7 @@ pipeline {
               -RepoRoot  $repoRoot `
               -EnvMapPath $envMapPath
           '''
-        }
+        // } // Cierrre de credentials
       }
     }
   }
