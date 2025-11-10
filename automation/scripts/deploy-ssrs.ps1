@@ -183,7 +183,7 @@ function Publish-Reports-And-MapDS {
     return
   }
 
-  $destReports = Normalize-RsPath "$ProjectRsFolder/Reports"
+  $destReports = Normalize-RsPath "$ProjectRsFolder"
   Ensure-RsPath -ApiUrl $ApiUrl -Path $destReports
 
   # PS 5.1: usar -Filter
