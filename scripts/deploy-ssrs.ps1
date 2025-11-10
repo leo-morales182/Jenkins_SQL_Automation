@@ -312,7 +312,7 @@ function Set-SharedDataSourceCredentials {
     [Parameter(Mandatory)][string] $MappingFile     # p.ej. repo\env\datasources.map.PROD.json
   )
 
-  if (-not (Test-Path $MappingFile)) { throw "No existe $MappingFile" }
+  if (-not (Test-Path $MappingFile)) { throw "No existe $($MappingFile)" }
   $map = Get-Content $MappingFile -Raw | ConvertFrom-Json
 
   $hasSetRsDataSource = Get-Command -Name Set-RsDataSource -ErrorAction SilentlyContinue
